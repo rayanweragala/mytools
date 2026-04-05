@@ -110,6 +110,19 @@ interface AiCurlRequestShape {
   params: Record<string, string>;
 }
 
+interface AiGeneratedTestCaseShape extends AiCurlRequestShape {
+  name: string;
+}
+
+const TEST_CASES_SYSTEM_PROMPT =
+  "You are an API testing assistant. Given an HTTP request, generate " +
+  "exactly 6 test case variations as a JSON array. Each variation tests " +
+  "a different edge case: missing required field, wrong data type, " +
+  "empty body, boundary value, invalid auth, unexpected extra field. " +
+  "Return only a JSON array of objects, each with: " +
+  "{ name: string, method, url, headers, body, params } " +
+  "No explanation. No markdown. Just the raw JSON array.";
+
 function toStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -137,6 +150,49 @@ function normalizeAiCurlRequest(value: unknown): AiCurlRequestShape | null {
     headers: toStringRecord(record.headers),
     body: typeof record.body === "string" ? record.body : record.body == null ? "" : JSON.stringify(record.body),
     params: toStringRecord(record.params)
+  };
+}
+
+function normalizeAiGeneratedTestCase(value: unknown): AiGeneratedTestCaseShape | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const normalizedRequest = normalizeAiCurlRequest(value);
+  if (!name || !normalizedRequest) {
+    return null;
+  }
+  return {
+    name,
+    ...normalizedRequest
+  };
+}
+
+function guessBodyFormat(body: string): BodyFormat {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return "json";
+  }
+  try {
+    JSON.parse(trimmed);
+    return "json";
+  } catch {
+    return "text";
+  }
+}
+
+function aiGeneratedCaseToSavedRequest(testCase: AiGeneratedTestCaseShape): Omit<SavedRequest, "id"> {
+  return {
+    name: testCase.name,
+    method: testCase.method,
+    url: mergeUrlAndParams(testCase.url, testCase.params),
+    headers: buildRowsFromRecord(testCase.headers),
+    bodyFormat: guessBodyFormat(testCase.body),
+    bodyText: testCase.body,
+    formFields: [{ key: "", value: "", enabled: true }],
+    params: buildRowsFromRecord(testCase.params),
+    auth: { type: "NONE" }
   };
 }
 
@@ -1035,6 +1091,84 @@ app.post("/api/ai/request-to-curl", aiLimiter, async (req: Request, res: Respons
     const message = error instanceof Error ? error.message : "curl generation failed";
     res.status(502).json({ success: false, error: message });
   }
+});
+
+app.post("/api/ai/generate-tests", aiLimiter, async (req: Request, res: Response) => {
+  const request = normalizeAiGeneratedTestCase((req.body as { request?: unknown })?.request);
+  if (!request) {
+    res.status(400).json({ success: false, error: "request payload is required" });
+    return;
+  }
+
+  const prompt = buildPrompt(TEST_CASES_SYSTEM_PROMPT, JSON.stringify(request, null, 2));
+
+  try {
+    const result = await generate(prompt);
+    const parsed = cleanAiJson<unknown>(result);
+    const array = Array.isArray(parsed) ? parsed : [];
+    const tests = array
+      .map((item: unknown) => normalizeAiGeneratedTestCase(item))
+      .filter((item: AiGeneratedTestCaseShape | null): item is AiGeneratedTestCaseShape => Boolean(item));
+
+    if (tests.length < 1) {
+      res.json({ success: false, error: "Could not parse generated tests" });
+      return;
+    }
+
+    res.json({ success: true, tests });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to generate tests";
+    res.status(502).json({ success: false, error: message });
+  }
+});
+
+app.post("/api/ai/generate-tests/save", (req: Request, res: Response) => {
+  const collectionId = typeof req.body?.collectionId === "string" ? req.body.collectionId : "";
+  const sourceRequestName = typeof req.body?.sourceRequestName === "string" ? req.body.sourceRequestName.trim() : "";
+  const tests = Array.isArray(req.body?.tests) ? req.body.tests : [];
+  if (!collectionId || tests.length === 0) {
+    res.status(400).json({ success: false, error: "collectionId and tests are required" });
+    return;
+  }
+
+  const normalized = tests
+    .map((item: unknown) => normalizeAiGeneratedTestCase(item))
+    .filter((item: AiGeneratedTestCaseShape | null): item is AiGeneratedTestCaseShape => Boolean(item));
+  if (normalized.length < 1) {
+    res.status(400).json({ success: false, error: "No valid tests to save" });
+    return;
+  }
+
+  let targetCollectionId = collectionId;
+  let collectionName = "";
+  if (collectionId === "new") {
+    const seed = sourceRequestName || normalized[0].name || "Generated";
+    const created = collectionsStore.create(`${seed} Tests`);
+    targetCollectionId = created.id;
+    collectionName = created.name;
+  } else {
+    const existing = collectionsStore.getById(collectionId);
+    if (!existing) {
+      res.status(404).json({ success: false, error: "collection not found" });
+      return;
+    }
+    collectionName = existing.name;
+  }
+
+  let saved = 0;
+  for (const testCase of normalized) {
+    const inserted = collectionsStore.addRequest(targetCollectionId, aiGeneratedCaseToSavedRequest(testCase));
+    if (inserted) {
+      saved += 1;
+    }
+  }
+
+  res.json({
+    success: true,
+    saved,
+    collectionId: targetCollectionId,
+    collectionName
+  });
 });
 
 app.put("/api/config/:endpoint", (req: Request, res: Response) => {

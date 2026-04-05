@@ -384,6 +384,24 @@
       </div>
     </div>
 
+    <div id="testsPreviewModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="testsPreviewTitle" hidden>
+      <div class="modal-header">
+        <h2 id="testsPreviewTitle" class="modal-title">Generated Test Cases</h2>
+        <button type="button" class="btn btn-glass btn-icon modal-close" data-close-modal="tests-preview" aria-label="Close generated tests">×</button>
+      </div>
+      <div class="modal-body tests-preview-body">
+        <div id="testsPreviewList" class="tests-preview-list"></div>
+      </div>
+      <div class="modal-footer tests-preview-footer">
+        <label class="field tests-preview-collection-field">
+          <span>Save to collection</span>
+          <select id="testsPreviewCollection" class="select-violet"></select>
+        </label>
+        <button type="button" id="testsPreviewCancelBtn" class="btn btn-glass" data-close-modal="tests-preview">Cancel</button>
+        <button type="button" id="testsPreviewSaveBtn" class="btn btn-primary">Save All Tests</button>
+      </div>
+    </div>
+
     <div id="envModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="envModalTitle" hidden>
       <div class="modal-header">
         <h2 id="envModalTitle" class="modal-title">Environments</h2>
@@ -438,6 +456,8 @@
         <button type="button" id="envPromptConfirmBtn" class="btn btn-primary">OK</button>
       </div>
     </div>
+
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/app.js"></script>
   </body>

@@ -96,6 +96,12 @@ const curlImportModalEl = document.getElementById("curlImportModal");
 const curlImportInputEl = document.getElementById("curlImportInput");
 const curlImportErrorEl = document.getElementById("curlImportError");
 const curlImportConvertBtn = document.getElementById("curlImportConvertBtn");
+const testsPreviewModalEl = document.getElementById("testsPreviewModal");
+const testsPreviewListEl = document.getElementById("testsPreviewList");
+const testsPreviewCollectionEl = document.getElementById("testsPreviewCollection");
+const testsPreviewSaveBtn = document.getElementById("testsPreviewSaveBtn");
+const testsPreviewCancelBtn = document.getElementById("testsPreviewCancelBtn");
+const toastHostEl = document.getElementById("toastHost");
 
 const envModalEl = document.getElementById("envModal");
 const newEnvBtn = document.getElementById("newEnvBtn");
@@ -166,6 +172,10 @@ let builderDebugAnalysis = "";
 
 let expandedCollectionIds = new Set();
 let openCollectionMenuId = null;
+let generatingTestsRequestId = null;
+let generatedTestsPreview = [];
+let generatedTestsSourceName = "";
+const expandedGeneratedTests = new Set();
 
 let selectedEnvEditId = null;
 let envVarDraft = [];
@@ -748,6 +758,26 @@ function showBuilderCopyCurlTooltip(text, type = "success") {
   }, 1400);
 }
 
+function showToast(message, type = "success") {
+  if (!toastHostEl) {
+    return;
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast-pill toast-${type}`;
+  toast.textContent = message;
+  toastHostEl.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("is-visible"));
+  setTimeout(() => {
+    toast.classList.remove("is-visible");
+    setTimeout(() => toast.remove(), 220);
+  }, 3000);
+}
+
+function bodyPreview(body) {
+  const text = typeof body === "string" ? body : prettyJson(body ?? "");
+  return text.trim() || "(empty)";
+}
+
 /* --- Main tabs --- */
 
 function getMainTab() {
@@ -1065,17 +1095,23 @@ function renderCollections() {
       const expanded = expandedCollectionIds.has(col.id);
       const reqs = (col.requests || [])
         .map((r) => {
+          const generating = generatingTestsRequestId === r.id;
           return `
             <div class="collection-item" data-collection-id="${escapeHtml(col.id)}" data-request-id="${escapeHtml(r.id)}">
               <div class="collection-item-main">
                 <span class="method-badge">${escapeHtml(r.method)}</span>
                 <span class="truncate" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
               </div>
-              <div class="collection-actions">
-                <button type="button" class="btn btn-glass btn-tiny" data-action="run-req">Run</button>
-                <button type="button" class="btn btn-glass btn-tiny" data-action="load-req">Load</button>
-                <button type="button" class="btn btn-glass btn-tiny" data-action="rename-req">Rename</button>
-                <button type="button" class="btn btn-glass btn-tiny" data-action="delete-req">Delete</button>
+              <div class="collection-item-actions">
+                <button type="button" class="btn btn-glass btn-tiny collection-menu-trigger" aria-label="Request actions">⋯</button>
+                <div class="menu-popover">
+                  <button type="button" class="menu-btn" data-action="run-req">Run</button>
+                  <button type="button" class="menu-btn" data-action="edit-req">Edit</button>
+                  <button type="button" class="menu-btn" data-action="generate-tests" ${generating ? "disabled" : ""}>
+                    ${generating ? "Generating…" : "Generate Tests"}
+                  </button>
+                  <button type="button" class="menu-btn" data-action="delete-req">Delete</button>
+                </div>
               </div>
             </div>`;
         })
@@ -1138,6 +1174,16 @@ function openModal(kind) {
     curlImportModalEl.classList.remove("is-hidden");
     queueMicrotask(() => curlImportInputEl?.focus());
   }
+  if (kind === "tests-preview") {
+    testsPreviewModalEl.hidden = false;
+    testsPreviewModalEl.classList.remove("is-hidden");
+    testsPreviewSaveBtn.disabled = false;
+    testsPreviewCollectionEl.innerHTML = [
+      '<option value="new">New collection</option>',
+      ...collections.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`)
+    ].join("");
+    renderGeneratedTestsPreview();
+  }
 }
 
 function closeEnvPrompt(result = null) {
@@ -1164,6 +1210,8 @@ function closeModals() {
   curlImportModalEl.classList.add("is-hidden");
   curlImportErrorEl.classList.add("is-hidden");
   curlImportErrorEl.textContent = "";
+  testsPreviewModalEl.hidden = true;
+  testsPreviewModalEl.classList.add("is-hidden");
   envModalEl.hidden = true;
   envModalEl.classList.add("is-hidden");
   closeEnvPrompt();
@@ -1383,6 +1431,53 @@ async function runRequestToCurl(payload) {
     throw new Error(data.error || "Could not generate curl command");
   }
   return data.curl;
+}
+
+function savedRequestToAiRequest(savedRequest) {
+  const headers = enabledRowsToRecord(savedRequest.headers || []);
+  const params = enabledRowsToRecord(savedRequest.params || []);
+  return {
+    name: savedRequest.name || "Request",
+    method: savedRequest.method || "GET",
+    url: savedRequest.url || "",
+    headers,
+    body: savedRequest.bodyText || "",
+    params
+  };
+}
+
+async function runGenerateTests(savedRequest) {
+  const request = savedRequestToAiRequest(savedRequest);
+  const res = await fetch("/api/ai/generate-tests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success || !Array.isArray(data.tests)) {
+    throw new Error(data.error || "Failed to generate tests");
+  }
+  return data.tests;
+}
+
+function renderGeneratedTestsPreview() {
+  testsPreviewListEl.innerHTML = generatedTestsPreview
+    .map((test, idx) => {
+      const id = `gen_test_${idx}`;
+      const expanded = expandedGeneratedTests.has(id);
+      return `
+        <article class="test-preview-card" data-test-id="${id}">
+          <div class="test-preview-head">
+            <p class="test-preview-name">${escapeHtml(test.name || `Test ${idx + 1}`)}</p>
+            <span class="method-badge">${escapeHtml(test.method || "GET")}</span>
+          </div>
+          <pre class="test-preview-body ${expanded ? "is-expanded" : ""}">${escapeHtml(bodyPreview(test.body))}</pre>
+          <button type="button" class="btn btn-glass btn-tiny test-preview-toggle" data-action="toggle-generated-test" data-test-id="${id}">
+            ${expanded ? "Collapse" : "Expand"}
+          </button>
+        </article>`;
+    })
+    .join("");
 }
 
 endpointTabsEl.addEventListener("click", (event) => {
@@ -2109,9 +2204,9 @@ collectionsMountEl.addEventListener("click", async (event) => {
     return;
   }
 
-  const loadReq = target.closest("button[data-action='load-req']");
-  if (loadReq) {
-    const row = loadReq.closest(".collection-item");
+  const editReq = target.closest("button[data-action='edit-req']");
+  if (editReq) {
+    const row = editReq.closest(".collection-item");
     const cid = row?.getAttribute("data-collection-id");
     const rid = row?.getAttribute("data-request-id");
     const col = collections.find((c) => c.id === cid);
@@ -2132,9 +2227,9 @@ collectionsMountEl.addEventListener("click", async (event) => {
     return;
   }
 
-  const renameReq = target.closest("button[data-action='rename-req']");
-  if (renameReq) {
-    const row = renameReq.closest(".collection-item");
+  const generateTestsBtn = target.closest("button[data-action='generate-tests']");
+  if (generateTestsBtn) {
+    const row = generateTestsBtn.closest(".collection-item");
     const cid = row?.getAttribute("data-collection-id");
     const rid = row?.getAttribute("data-request-id");
     const col = collections.find((c) => c.id === cid);
@@ -2142,16 +2237,21 @@ collectionsMountEl.addEventListener("click", async (event) => {
     if (!req) {
       return;
     }
-    const name = prompt("Request name", req.name);
-    if (!name || !name.trim()) {
-      return;
+    generatingTestsRequestId = req.id;
+    renderCollections();
+    try {
+      const tests = await runGenerateTests(req);
+      generatedTestsPreview = tests;
+      generatedTestsSourceName = req.name || "Request";
+      expandedGeneratedTests.clear();
+      openModal("tests-preview");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate tests";
+      showToast(message, "error");
+    } finally {
+      generatingTestsRequestId = null;
+      renderCollections();
     }
-    await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() })
-    });
-    await refreshBuilderContext();
     return;
   }
 
@@ -2166,6 +2266,69 @@ collectionsMountEl.addEventListener("click", async (event) => {
     await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, { method: "DELETE" });
     await refreshBuilderContext();
   }
+});
+
+testsPreviewListEl.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const toggleBtn = target.closest("button[data-action='toggle-generated-test']");
+  if (!(toggleBtn instanceof HTMLButtonElement)) {
+    return;
+  }
+  const id = toggleBtn.dataset.testId;
+  if (!id) {
+    return;
+  }
+  if (expandedGeneratedTests.has(id)) {
+    expandedGeneratedTests.delete(id);
+  } else {
+    expandedGeneratedTests.add(id);
+  }
+  renderGeneratedTestsPreview();
+});
+
+testsPreviewSaveBtn.addEventListener("click", async () => {
+  if (!generatedTestsPreview.length) {
+    showToast("No generated tests to save.", "error");
+    return;
+  }
+
+  const collectionId = testsPreviewCollectionEl.value || "new";
+  testsPreviewSaveBtn.disabled = true;
+  try {
+    const res = await fetch("/api/ai/generate-tests/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collectionId,
+        tests: generatedTestsPreview,
+        sourceRequestName: generatedTestsSourceName
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Failed to save generated tests");
+    }
+    const count = Number(data.saved || 0);
+    closeModals();
+    await refreshBuilderContext();
+    const name =
+      collectionId === "new"
+        ? data.collectionName || `${generatedTestsSourceName || "Request"} Tests`
+        : collections.find((c) => c.id === collectionId)?.name || data.collectionName || "collection";
+    showToast(`${count} tests saved to ${name}`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to save generated tests";
+    showToast(message, "error");
+  } finally {
+    testsPreviewSaveBtn.disabled = false;
+  }
+});
+
+testsPreviewCancelBtn.addEventListener("click", () => {
+  closeModals();
 });
 
 builderHistoryMountEl.addEventListener("click", (event) => {

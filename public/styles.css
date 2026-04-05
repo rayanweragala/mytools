@@ -1,0 +1,285 @@
+:root {
+  --bg: #f4f7fb;
+  --panel: #ffffff;
+  --line: #d8e0ec;
+  --text: #11223a;
+  --muted: #4d6078;
+  --primary: #1769e0;
+  --danger: #cc2f2f;
+  --secondary: #425466;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: linear-gradient(120deg, #eef3fb 0%, #f9fbfe 100%);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand .icon {
+  font-size: 20px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 14px;
+  padding: 14px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 70vh;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#logSearch {
+  padding: 4px 8px;
+  font-size: 12px;
+  width: 150px;
+}
+
+.config-panel .panel-header select {
+  min-width: 180px;
+}
+
+.url-helper {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+}
+
+.final-url-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.final-url-wrap span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.final-url-wrap code {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fbff;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 14px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px;
+  background: #fff;
+  color: var(--text);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: #f3f6fb;
+  color: #7b8ca3;
+  cursor: not-allowed;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.save-status {
+  margin: 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.save-status[data-type="success"] {
+  color: #0c6e3d;
+}
+
+.save-status[data-type="error"] {
+  color: var(--danger);
+}
+
+.btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn.primary {
+  background: var(--primary);
+}
+
+.btn.secondary {
+  background: var(--secondary);
+}
+
+.btn.danger {
+  background: var(--danger);
+}
+
+.logs {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  max-height: calc(70vh - 56px);
+  overflow: auto;
+}
+
+.log-item {
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--primary);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.log-item.fail {
+  border-left-color: var(--danger);
+}
+
+.log-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.log-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.tag {
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #fff;
+}
+
+pre {
+  margin: 8px 0 0;
+  background: #0f1b2d;
+  color: #dbe8ff;
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.pill {
+  font-size: 12px;
+  border-radius: 999px;
+  background: #eef4ff;
+  border: 1px solid #bed3ff;
+  padding: 3px 9px;
+}
+
+.footer {
+  padding: 10px 14px 18px;
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
+  }
+}

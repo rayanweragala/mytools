@@ -55,6 +55,7 @@ const blockedReplayHeaders = new Set([
 const pendingReplaySignatures = new Map<string, number>();
 let tunnelUrl: string | null = null;
 const tunnelPortPattern = new RegExp(`:${PORT}$`);
+const tunnelName = `webhook-lab-${PORT}`;
 
 function delay(ms: number): Promise<void> {
   if (!ms || ms <= 0) {
@@ -230,6 +231,10 @@ function choosePreferredTunnel(tunnels: ngrok.Ngrok.Tunnel[]): ngrok.Ngrok.Tunne
   if (tunnels.length === 0) {
     return null;
   }
+  const namedTunnel = tunnels.find((tunnel) => tunnel.name === tunnelName);
+  if (namedTunnel) {
+    return namedTunnel;
+  }
   const httpsTunnel = tunnels.find((tunnel) => tunnel.proto === "https");
   return httpsTunnel || tunnels[0];
 }
@@ -276,9 +281,44 @@ async function findExistingTunnelUrl(maybeError?: unknown): Promise<string | nul
     }
   }
 
+  const appNamedTunnel = tunnels.find((tunnel) => tunnel.name === tunnelName);
+  if (appNamedTunnel?.public_url) {
+    return appNamedTunnel.public_url;
+  }
+
   const matchingByPort = tunnels.filter(isTunnelForPort);
   const tunnel = choosePreferredTunnel(matchingByPort);
   return tunnel?.public_url || null;
+}
+
+function extractNgrokErrorMessage(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "unknown ngrok error";
+  }
+
+  const bodyMessage = (error as { body?: { msg?: unknown; details?: { err?: unknown } } }).body;
+  const detailsErr = bodyMessage?.details?.err;
+  if (typeof detailsErr === "string" && detailsErr.trim()) {
+    return detailsErr;
+  }
+  if (typeof bodyMessage?.msg === "string" && bodyMessage.msg.trim()) {
+    return bodyMessage.msg;
+  }
+
+  const directMessage = (error as { message?: unknown }).message;
+  if (typeof directMessage === "string" && directMessage.trim()) {
+    return directMessage;
+  }
+
+  return "unknown ngrok error";
+}
+
+async function tryStartTunnel(authtoken: string): Promise<string> {
+  return ngrok.connect({
+    addr: PORT,
+    name: tunnelName,
+    ...(authtoken ? { authtoken } : {})
+  });
 }
 
 const app = express();
@@ -384,10 +424,7 @@ app.post("/api/tunnel/start", async (_req, res) => {
   try {
     const rawToken = process.env.NGROK_AUTHTOKEN;
     const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
-    tunnelUrl = await ngrok.connect({
-      addr: PORT,
-      ...(authtoken ? { authtoken } : {})
-    });
+    tunnelUrl = await tryStartTunnel(authtoken);
 
     res.json({ active: true, url: tunnelUrl });
   } catch (error) {
@@ -398,8 +435,29 @@ app.post("/api/tunnel/start", async (_req, res) => {
       return;
     }
 
-    tunnelUrl = null;
-    res.status(500).json({ active: false, url: null, error: "Failed to start tunnel" });
+    const rawToken = process.env.NGROK_AUTHTOKEN;
+    const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
+    try {
+      await ngrok.kill();
+      tunnelUrl = await tryStartTunnel(authtoken);
+      res.json({ active: true, url: tunnelUrl });
+      return;
+    } catch (restartError) {
+      const recoveredAfterRestart = await findExistingTunnelUrl(restartError);
+      if (recoveredAfterRestart) {
+        tunnelUrl = recoveredAfterRestart;
+        res.json({ active: true, url: tunnelUrl });
+        return;
+      }
+
+      tunnelUrl = null;
+      res.status(500).json({
+        active: false,
+        url: null,
+        error: "Failed to start tunnel",
+        details: extractNgrokErrorMessage(restartError)
+      });
+    }
   }
 });
 

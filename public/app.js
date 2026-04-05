@@ -513,8 +513,8 @@ function syncAiUi() {
   bodyAiGenerateBtn.disabled = disabled;
   simAiGenerateBtn.disabled = disabled;
   if (disabled) {
-    bodyAiGenerateBtn.title = "Set GEMINI_API_KEY in .env to enable AI generation";
-    simAiGenerateBtn.title = "Set GEMINI_API_KEY in .env to enable AI generation";
+    bodyAiGenerateBtn.title = "Enable AI in backend config to use generation";
+    simAiGenerateBtn.title = "Enable AI in backend config to use generation";
   } else {
     bodyAiGenerateBtn.removeAttribute("title");
     simAiGenerateBtn.removeAttribute("title");

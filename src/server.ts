@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import rateLimit from "express-rate-limit";
 import * as ngrok from "ngrok";
-import { analyzeTraffic, generatePayload, isAiConfigured } from "./aiGemini.js";
+import { ANALYSIS_SYSTEM_PROMPT, PAYLOAD_SYSTEM_PROMPT, generate, getAiFeatures } from "./ai.js";
 import { executeBuilderSend, payloadFromSaved } from "./builderHttp.js";
 import { collectionsStore } from "./collectionsStore.js";
 import { environmentsStore } from "./environmentsStore.js";
@@ -542,8 +542,11 @@ app.get("/api/state", (_req, res) => {
 });
 
 app.get("/api/config/features", (_req, res) => {
+  const ai = getAiFeatures();
   res.json({
-    aiEnabled: isAiConfigured(),
+    aiEnabled: ai.aiEnabled,
+    localAiEnabled: ai.localAiEnabled,
+    geminiEnabled: ai.geminiEnabled,
     ngrokEnabled: ngrokConfigured()
   });
 });
@@ -794,12 +797,16 @@ app.post("/api/ai/generate", aiLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  const out = await generatePayload(prompt, context);
-  if (out.error) {
-    res.json({ result: "", error: out.error });
-    return;
+  const userText = context ? `${prompt}\n\nContext: ${context}` : prompt;
+  const fullPrompt = `${PAYLOAD_SYSTEM_PROMPT}\n\n${userText}`;
+
+  try {
+    const result = await generate(fullPrompt);
+    res.json({ result });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "generation failed";
+    res.json({ result: "", error: msg });
   }
-  res.json({ result: out.result });
 });
 
 app.post("/api/ai/analyze-log", aiLimiter, async (req: Request, res: Response) => {
@@ -830,12 +837,15 @@ app.post("/api/ai/analyze-log", aiLimiter, async (req: Request, res: Response) =
     `durationMs: ${entry.durationMs ?? "n/a"}`
   ].join("\n");
 
-  const out = await analyzeTraffic(requestSummary, responseSummary);
-  if (out.error) {
-    res.json({ result: "", error: out.error });
-    return;
+  const analyticPrompt = `${ANALYSIS_SYSTEM_PROMPT}\n\nRequest:\n${requestSummary}\n\nResponse:\n${responseSummary}`;
+
+  try {
+    const result = await generate(analyticPrompt);
+    res.json({ result });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "analysis failed";
+    res.json({ result: "", error: msg });
   }
-  res.json({ result: out.result });
 });
 
 app.put("/api/config/:endpoint", (req: Request, res: Response) => {
@@ -1170,7 +1180,14 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
 
 app.listen(PORT, () => {
   logStartup(`Webhook Mock Lab started on http://localhost:${PORT}`);
-  void isAiConfigured();
+  const aiFeatures = getAiFeatures();
+  if (aiFeatures.localAiEnabled) {
+    logStartup("AI: Local provider enabled");
+  } else if (aiFeatures.geminiEnabled) {
+    logStartup("AI: Gemini enabled");
+  } else {
+    logStartup("AI: No provider configured — AI features disabled");
+  }
   logStartup("Endpoints:");
   const { endpointKeys } = store.getState();
   endpointKeys.forEach((key) => {

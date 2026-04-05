@@ -1,6 +1,6 @@
-# webhook-mock-lab
+# webhooks
 
-`webhook-mock-lab` is a local webhook playground.
+`webhooks` is a local webhook playground.
 Point third-party webhooks at it, tweak endpoint responses, and watch requests live.
 It is great for auth failures, retry sequences, delayed responses, and replay testing.
 

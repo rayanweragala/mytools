@@ -21,9 +21,11 @@ export interface RequestLog {
   path: string;
   headers: Record<string, string | string[] | undefined>;
   body: unknown;
+  rawBody: string;
   authValid: boolean;
   returnedStatusCode: number;
   note: string;
+  replayed: boolean;
 }
 
 export interface AppState {

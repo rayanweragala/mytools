@@ -2,7 +2,7 @@ import express, { Request, Response } from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { store } from "./store.js";
-import { EndpointConfig, EndpointKey, RequestLog } from "./types.js";
+import { EndpointConfig, EndpointKey } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +10,16 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 8787);
 
 type RequestWithRawBody = Request & { rawBody?: string };
+type HeaderMap = Record<string, string | string[] | undefined>;
+
+const blockedReplayHeaders = new Set([
+  "host",
+  "connection",
+  "content-length",
+  "transfer-encoding",
+  "accept-encoding"
+]);
+const pendingReplaySignatures = new Map<string, number>();
 
 function delay(ms: number): Promise<void> {
   if (!ms || ms <= 0) {
@@ -89,6 +99,84 @@ function getLogBody(req: RequestWithRawBody): unknown {
   }
 }
 
+function getRawRequestBody(req: RequestWithRawBody): string {
+  if (typeof req.rawBody === "string") {
+    return req.rawBody;
+  }
+  if (typeof req.body === "string") {
+    return req.body;
+  }
+  if (req.body === undefined || req.body === null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(req.body);
+  } catch (_error) {
+    return String(req.body);
+  }
+}
+
+function normalizeHeaders(headers: HeaderMap): Array<[string, string]> {
+  return Object.entries(headers)
+    .filter(([key, value]) => value !== undefined && !blockedReplayHeaders.has(key.toLowerCase()))
+    .map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(",") : String(value)] as [string, string])
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function buildReplaySignature(method: string, path: string, headers: HeaderMap, rawBody: string): string {
+  return JSON.stringify({
+    method: method.toUpperCase(),
+    path,
+    headers: normalizeHeaders(headers),
+    rawBody
+  });
+}
+
+function queueReplaySignature(signature: string): void {
+  pendingReplaySignatures.set(signature, (pendingReplaySignatures.get(signature) ?? 0) + 1);
+}
+
+function consumeReplaySignature(signature: string): boolean {
+  const current = pendingReplaySignatures.get(signature);
+  if (!current) {
+    return false;
+  }
+  if (current === 1) {
+    pendingReplaySignatures.delete(signature);
+    return true;
+  }
+
+  pendingReplaySignatures.set(signature, current - 1);
+  return true;
+}
+
+function unqueueReplaySignature(signature: string): void {
+  const current = pendingReplaySignatures.get(signature);
+  if (!current) {
+    return;
+  }
+  if (current === 1) {
+    pendingReplaySignatures.delete(signature);
+    return;
+  }
+
+  pendingReplaySignatures.set(signature, current - 1);
+}
+
+function canIncludeBody(method: string): boolean {
+  const upperMethod = method.toUpperCase();
+  return upperMethod !== "GET" && upperMethod !== "HEAD";
+}
+
+function buildReplayHeaders(headers: HeaderMap): Record<string, string> {
+  const replayHeaders: Record<string, string> = {};
+  normalizeHeaders(headers).forEach(([key, value]) => {
+    replayHeaders[key] = value;
+  });
+  return replayHeaders;
+}
+
 const app = express();
 app.use("/api", express.json({ limit: "2mb", verify: captureRawBody }));
 app.use("/api", express.urlencoded({ extended: true, limit: "2mb", verify: captureRawBody }));
@@ -126,6 +214,42 @@ app.post("/api/logs/clear", (_req, res) => {
   res.json({ success: true });
 });
 
+app.post("/api/logs/:id/replay", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid log id" });
+    return;
+  }
+
+  const log = store.getState().logs.find((entry) => entry.id === id);
+  if (!log) {
+    res.status(404).json({ error: "Log entry not found" });
+    return;
+  }
+
+  const replayMethod = (log.method || "POST").toUpperCase();
+  const replayUrl = `http://127.0.0.1:${PORT}${log.path}`;
+  const replayRawBody = typeof log.rawBody === "string" ? log.rawBody : "";
+  const replaySignature = buildReplaySignature(replayMethod, log.path, log.headers, replayRawBody);
+  queueReplaySignature(replaySignature);
+
+  try {
+    const replayResponse = await fetch(replayUrl, {
+      method: replayMethod,
+      headers: buildReplayHeaders(log.headers),
+      body: canIncludeBody(replayMethod) ? replayRawBody : undefined
+    });
+
+    res.json({
+      success: replayResponse.ok,
+      status: replayResponse.status
+    });
+  } catch (_error) {
+    unqueueReplaySignature(replaySignature);
+    res.status(502).json({ error: "Replay request failed" });
+  }
+});
+
 app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
   const request = req as RequestWithRawBody;
   const endpoint = normalizeEndpointKey(req.params.endpoint);
@@ -137,6 +261,8 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
   const { configs } = store.getState();
   const cfg = configs[endpoint];
   const authValid = validateAuth(req, cfg);
+  const rawBody = getRawRequestBody(request);
+  const replayed = consumeReplaySignature(buildReplaySignature(req.method, req.originalUrl, req.headers, rawBody));
 
   if (!authValid) {
     store.addLog({
@@ -146,9 +272,11 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       path: req.originalUrl,
       headers: req.headers,
       body: getLogBody(request),
+      rawBody,
       authValid: false,
       returnedStatusCode: 401,
-      note: "Auth failed"
+      note: "Auth failed",
+      replayed
     });
 
     res.status(401).json({ status: "unauthorized", endpoint });
@@ -172,9 +300,11 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     path: req.originalUrl,
     headers: req.headers,
     body: getLogBody(request),
+    rawBody,
     authValid: true,
     returnedStatusCode: statusCode,
-    note: cfg.statusCodes && cfg.statusCodes.length > 0 ? "Sequence status code used" : "Configured status code used"
+    note: cfg.statusCodes && cfg.statusCodes.length > 0 ? "Sequence status code used" : "Configured status code used",
+    replayed
   });
 
   if (cfg.responseHeaders) {

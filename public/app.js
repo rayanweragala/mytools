@@ -8,6 +8,7 @@ const ngrokBaseUrlEl = document.getElementById("ngrokBaseUrl");
 const finalWebhookUrlEl = document.getElementById("finalWebhookUrl");
 const saveStatusEl = document.getElementById("saveStatus");
 const logSearchEl = document.getElementById("logSearch");
+const replayingLogIds = new Set();
 
 const fields = {
   authType: document.getElementById("authType"),
@@ -57,6 +58,15 @@ function prettyJson(input) {
   } catch {
     return String(input);
   }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 async function fetchState() {
@@ -124,11 +134,16 @@ function renderLogs() {
   logsEl.innerHTML = filteredLogs
     .map((log) => {
       const failClass = log.authValid && log.returnedStatusCode < 400 ? "" : "fail";
+      const replayBadge = log.replayed ? `<span class="tag replayed-badge">↺ replayed</span>` : "";
+      const replayButtonLabel = replayingLogIds.has(log.id) ? "Replaying..." : "Replay";
       return `
       <article class="log-item ${failClass}">
         <div class="log-top">
           <strong>${log.endpoint}</strong>
-          <span>${new Date(log.timestamp).toLocaleString()}</span>
+          <div class="log-top-actions">
+            <button class="btn secondary replay-btn" data-log-id="${log.id}" ${replayingLogIds.has(log.id) ? "disabled" : ""}>${replayButtonLabel}</button>
+            <span>${new Date(log.timestamp).toLocaleString()}</span>
+          </div>
         </div>
         <div class="log-meta">
           <span class="tag">${log.method}</span>
@@ -136,8 +151,9 @@ function renderLogs() {
           <span class="tag">status ${log.returnedStatusCode}</span>
           <span class="tag">auth ${log.authValid ? "ok" : "fail"}</span>
           <span class="tag">${log.note}</span>
+          ${replayBadge}
         </div>
-        <pre>${prettyJson(log.body)}</pre>
+        <pre>${escapeHtml(prettyJson(log.body))}</pre>
       </article>`;
     })
     .join("");
@@ -241,6 +257,38 @@ resetBtn.addEventListener("click", async () => {
 clearLogsBtn.addEventListener("click", async () => {
   await fetch("/api/logs/clear", { method: "POST" });
   await fetchState();
+});
+
+logsEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const button = target.closest(".replay-btn");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const id = Number(button.dataset.logId);
+  if (!Number.isInteger(id) || replayingLogIds.has(id)) {
+    return;
+  }
+
+  replayingLogIds.add(id);
+  renderLogs();
+  try {
+    const response = await fetch(`/api/logs/${id}/replay`, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`Replay failed (${response.status})`);
+    }
+    await fetchState();
+  } catch (_error) {
+    setSaveStatus("Replay failed for selected request.", "error");
+  } finally {
+    replayingLogIds.delete(id);
+    renderLogs();
+  }
 });
 
 fetchState();

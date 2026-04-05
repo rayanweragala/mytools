@@ -236,6 +236,12 @@ textarea {
   color: var(--muted);
 }
 
+.log-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .log-meta {
   display: flex;
   gap: 8px;
@@ -249,6 +255,12 @@ textarea {
   border-radius: 999px;
   padding: 2px 8px;
   background: #fff;
+}
+
+.replayed-badge {
+  background: #f0f2f6;
+  border-color: #c6ccda;
+  color: #4f5564;
 }
 
 pre {

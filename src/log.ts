@@ -1,17 +1,17 @@
 /** Structured stderr logging — avoid console.log in request paths. */
 
 export function logWarn(message: string): void {
-  console.warn(`[webhooks] ${message}`);
+  console.warn(`[mytools] ${message}`);
 }
 
 export function logError(message: string, detail?: unknown): void {
   if (detail !== undefined) {
-    console.error(`[webhooks] ${message}`, detail);
+    console.error(`[mytools] ${message}`, detail);
     return;
   }
-  console.error(`[webhooks] ${message}`);
+  console.error(`[mytools] ${message}`);
 }
 
 export function logStartup(message: string): void {
-  console.warn(`[webhooks] ${message}`);
+  console.warn(`[mytools] ${message}`);
 }

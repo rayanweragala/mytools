@@ -108,7 +108,7 @@ const fields = {
   responseBody: document.getElementById("responseBody")
 };
 
-const MAIN_TAB_KEY = "webhooks_active_tab";
+const MAIN_TAB_KEY = "mytools_active_tab";
 const defaultRow = () => ({ key: "", value: "", enabled: true });
 
 let appState = null;
@@ -345,7 +345,7 @@ function renderLogs() {
     logsEl.innerHTML = `
       <div class="empty-state">
         <span class="pulse-dot" aria-hidden="true"></span>
-        <span>${searchTerm ? "No matching requests." : "Waiting for webhooks..."}</span>
+        <span>${searchTerm ? "No matching requests." : "Waiting for mytools..."}</span>
       </div>`;
     return;
   }

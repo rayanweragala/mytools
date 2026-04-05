@@ -25,8 +25,8 @@ We appreciate your interest in contributing! Whether it's a bug report, a featur
 
 ```bash
 # Clone your fork
-git clone https://github.com/your-username/webhook-mock-lab.git
-cd webhook-mock-lab
+git clone https://github.com/your-username/mytools.git
+cd mytools
 
 # Install dependencies
 npm install

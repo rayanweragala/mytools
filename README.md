@@ -1,7 +1,7 @@
-# webhooks
+# mytools
 
-`webhooks` is a local webhook playground.
-Point third-party webhooks at it, tweak endpoint responses, and watch requests live.
+`mytools` is a local webhook playground.
+Point third-party mytools at it, tweak endpoint responses, and watch requests live.
 It is great for auth failures, retry sequences, delayed responses, and replay testing.
 
 You get request replay, embedded ngrok controls, and persisted endpoint configs (`data/config.json`).
@@ -84,4 +84,4 @@ Replay log id `12`:
 curl -X POST http://localhost:8787/api/logs/12/replay
 ```
 
-Run it, point webhooks at it, and break things on purpose.
+Run it, point mytools at it, and break things on purpose.

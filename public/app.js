@@ -72,6 +72,13 @@ const respWarningsEl = document.getElementById("respWarnings");
 const respPanelBodyEl = document.getElementById("respPanelBody");
 const respPanelHeadersEl = document.getElementById("respPanelHeaders");
 const respPanelRawEl = document.getElementById("respPanelRaw");
+const builderDebugSectionEl = document.getElementById("builderDebugSection");
+const builderDebugBtn = document.getElementById("builderDebugBtn");
+const builderDebugBtnTextEl = document.getElementById("builderDebugBtnText");
+const builderDebugSpinnerEl = document.getElementById("builderDebugSpinner");
+const builderDebugResultEl = document.getElementById("builderDebugResult");
+const builderDebugLabelEl = document.getElementById("builderDebugLabel");
+const builderDebugTextEl = document.getElementById("builderDebugText");
 
 const collectionsMountEl = document.getElementById("collectionsMount");
 const newCollectionBtn = document.getElementById("newCollectionBtn");
@@ -137,7 +144,8 @@ const dirtyEndpoints = new Set();
 const expandedLogIds = new Set();
 const replayingLogIds = new Set();
 const seenLogIds = new Set();
-const analyzedLogIds = new Set();
+const debuggingLogIds = new Set();
+const logDebugAnalysisById = new Map();
 
 let collections = [];
 let builderHistory = [];
@@ -151,7 +159,10 @@ let builderBodyFormat = "json";
 let suppressUrlSync = false;
 
 let lastBuilderResponse = null;
+let lastBuilderRequestPayload = null;
 let respActiveTab = "body";
+let builderDebugLoading = false;
+let builderDebugAnalysis = "";
 
 let expandedCollectionIds = new Set();
 let openCollectionMenuId = null;
@@ -197,6 +208,120 @@ function recordToRows(record) {
   }
   const rows = Object.entries(record).map(([key, value]) => ({ key, value: String(value ?? ""), enabled: true }));
   return rows.length ? rows : [defaultRow()];
+}
+
+function authRowsToDebugHeaders(auth) {
+  const headers = {};
+  if (!auth || auth.type === "NONE") {
+    return headers;
+  }
+  if (auth.type === "BEARER") {
+    const token = String(auth.bearerToken || "").trim();
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
+    }
+    return headers;
+  }
+  if (auth.type === "API_KEY") {
+    const name = String(auth.apiKeyHeader || "").trim();
+    if (name) {
+      headers[name] = String(auth.apiKeyValue ?? "");
+    }
+    return headers;
+  }
+  if (auth.type === "BASIC") {
+    const user = String(auth.basicUser || "");
+    const pass = String(auth.basicPassword || "");
+    headers.authorization = `Basic ${btoa(`${user}:${pass}`)}`;
+  }
+  return headers;
+}
+
+function toBuilderDebugRequest(payload) {
+  if (!payload) {
+    return null;
+  }
+  const headers = {
+    ...enabledRowsToRecord(payload.headers),
+    ...authRowsToDebugHeaders(payload.auth)
+  };
+  return {
+    method: String(payload.method || "GET").toUpperCase(),
+    url: String(payload.url || ""),
+    headers,
+    body: typeof payload.body === "string" ? payload.body : ""
+  };
+}
+
+function toBuilderDebugResponse(result) {
+  if (!result) {
+    return null;
+  }
+  return {
+    status: Number(result.status || 0),
+    statusText: String(result.statusText || ""),
+    headers: result.headers || {},
+    body: typeof result.body === "string" ? result.body : prettyJson(result.body ?? "")
+  };
+}
+
+function toLogDebugPayload(log) {
+  const request = {
+    method: String(log.method || "GET"),
+    url: `${window.location.origin}${String(log.path || "")}`,
+    headers: log.headers || {},
+    body: typeof log.rawBody === "string" ? log.rawBody : prettyJson(log.body ?? "")
+  };
+  const response = {
+    status: Number(log.returnedStatusCode || 0),
+    statusText: String(log.note || ""),
+    headers: log.responseHeaders || {},
+    body:
+      typeof log.responseBody === "string"
+        ? log.responseBody
+        : log.responseBody === undefined
+          ? ""
+          : prettyJson(log.responseBody)
+  };
+  return { request, response };
+}
+
+async function runAiDebug(request, response) {
+  const res = await fetch("/api/ai/debug", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request, response })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success || typeof data.analysis !== "string") {
+    throw new Error(data.error || "AI debug failed");
+  }
+  return data.analysis;
+}
+
+function renderBuilderDebugState() {
+  if (!builderResponsePanelEl || !builderDebugSectionEl) {
+    return;
+  }
+  const status = Number(lastBuilderResponse?.status || 0);
+  const visible = features.aiEnabled && status >= 400;
+  builderDebugSectionEl.classList.toggle("is-hidden", !visible);
+  if (!visible) {
+    return;
+  }
+
+  builderDebugBtn.disabled = builderDebugLoading;
+  builderDebugBtnTextEl.textContent = builderDebugLoading ? "Analyzing…" : "Debug with AI";
+  builderDebugSpinnerEl.classList.toggle("is-hidden", !builderDebugLoading);
+  if (builderDebugAnalysis) {
+    builderDebugResultEl.classList.remove("is-hidden");
+    builderDebugLabelEl.textContent = "AI Analysis";
+    builderDebugTextEl.textContent = builderDebugAnalysis;
+  } else {
+    builderDebugResultEl.classList.add("is-hidden");
+    builderDebugLabelEl.textContent = "AI Analysis";
+    builderDebugTextEl.textContent = "";
+  }
 }
 
 function prettyJson(input) {
@@ -396,12 +521,21 @@ function renderLogs() {
       const replayedBadge = log.replayed ? '<span class="replayed-badge">↺ replayed</span>' : "";
       const durationText =
         typeof log.durationMs === "number" ? `<div class="log-timing">Response time: ${log.durationMs} ms</div>` : "";
-      const analyzeBtn = features.aiEnabled
-        ? `<button type="button" class="btn btn-glass btn-micro" data-action="analyze" data-log-id="${log.id}" ${
-            analyzedLogIds.has(log.id) ? "disabled" : ""
-          }>${analyzedLogIds.has(log.id) ? "Analyzed" : "Analyze with AI"}</button>`
+      const shouldShowDebug = features.aiEnabled && Number(log.returnedStatusCode) >= 400;
+      const debugging = debuggingLogIds.has(log.id);
+      const debugAnalysis = logDebugAnalysisById.get(log.id) || "";
+      const debugBlock = shouldShowDebug
+        ? `
+            <div class="log-block ai-debug-block">
+              ${
+                debugAnalysis
+                  ? `<p class="ai-debug-label">AI Analysis</p><div class="ai-debug-box">${escapeHtml(debugAnalysis)}</div>`
+                  : `<button type="button" class="btn btn-glass btn-micro ai-debug-btn" data-action="debug-log" data-log-id="${log.id}" ${
+                      debugging ? "disabled" : ""
+                    }><span>${debugging ? "Analyzing…" : "Debug with AI"}</span>${debugging ? '<span class="ai-spinner" aria-hidden="true"></span>' : ""}</button>`
+              }
+            </div>`
         : "";
-      const analysisBoxId = `analysis-${log.id}`;
       return `
         <article class="log-card ${cssStatus} ${isNew ? "new-entry" : ""}" data-log-id="${log.id}">
           <button type="button" class="btn btn-glass replay-btn" data-action="replay" data-log-id="${log.id}" ${replaying ? "disabled" : ""}>${replaying ? "Replaying" : "Replay"}</button>
@@ -435,10 +569,7 @@ function renderLogs() {
               <h3>Body</h3>
               <pre>${escapeHtml(prettyJson(log.body))}</pre>
             </div>
-            <div class="log-block">
-              ${analyzeBtn}
-              <div id="${analysisBoxId}" class="ai-analyze-box is-hidden" hidden></div>
-            </div>
+            ${debugBlock}
           </div>
         </article>`;
     })
@@ -550,6 +681,8 @@ function syncAiUi() {
     bodyAiGenerateBtn.removeAttribute("title");
     simAiGenerateBtn.removeAttribute("title");
   }
+  renderBuilderDebugState();
+  renderLogs();
 }
 
 async function updateChaosState(nextState) {
@@ -1151,6 +1284,8 @@ function setRespSubtab(name) {
 
 function showBuilderResponse(result) {
   lastBuilderResponse = result;
+  builderDebugLoading = false;
+  builderDebugAnalysis = "";
   builderResponsePanelEl.classList.remove("is-hidden");
   respStatusBadgeEl.textContent = String(result.status);
   respStatusBadgeEl.className = `status-badge-pill ${statusPillClass(Number(result.status))}`;
@@ -1174,6 +1309,7 @@ function showBuilderResponse(result) {
   respHeadersOutEl.textContent = prettyJson(result.headers || {});
   respRawOutEl.textContent = result.body || "";
   setRespSubtab("body");
+  renderBuilderDebugState();
 }
 
 async function runAiGenerate(prompt, context) {
@@ -1469,34 +1605,29 @@ logsEl.addEventListener("click", async (event) => {
     return;
   }
 
-  const analyzeBtn = target.closest("button[data-action='analyze']");
-  if (analyzeBtn instanceof HTMLButtonElement) {
+  const debugBtn = target.closest("button[data-action='debug-log']");
+  if (debugBtn instanceof HTMLButtonElement) {
     event.stopPropagation();
-    const id = Number(analyzeBtn.dataset.logId);
-    if (!features.aiEnabled || !Number.isInteger(id) || analyzedLogIds.has(id)) {
+    const id = Number(debugBtn.dataset.logId);
+    if (!features.aiEnabled || !Number.isInteger(id) || debuggingLogIds.has(id) || logDebugAnalysisById.has(id)) {
       return;
     }
-    analyzeBtn.disabled = true;
-    analyzeBtn.textContent = "Analyzing…";
+    const log = (appState?.logs || []).find((entry) => Number(entry.id) === id);
+    if (!log || Number(log.returnedStatusCode) < 400) {
+      return;
+    }
+    debuggingLogIds.add(id);
+    renderLogs();
     try {
-      const res = await fetch("/api/ai/analyze-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logId: id })
-      });
-      const data = await res.json();
-      const box = document.getElementById(`analysis-${id}`);
-      if (box) {
-        box.classList.remove("is-hidden");
-        box.hidden = false;
-        box.textContent = data.error ? `Error: ${data.error}` : data.result || "";
-      }
-      analyzedLogIds.add(id);
-      analyzeBtn.textContent = "Analyzed";
+      const payload = toLogDebugPayload(log);
+      const analysis = await runAiDebug(payload.request, payload.response);
+      logDebugAnalysisById.set(id, analysis);
+      renderLogs();
     } catch (_e) {
-      analyzeBtn.disabled = false;
-      analyzeBtn.textContent = "Analyze with AI";
       setSaveStatus("AI analysis failed.", "error");
+    } finally {
+      debuggingLogIds.delete(id);
+      renderLogs();
     }
     return;
   }
@@ -1728,10 +1859,12 @@ builderAuthTypeEl.addEventListener("change", syncBuilderAuthUi);
 builderSendBtn.addEventListener("click", async () => {
   builderSendBtn.disabled = true;
   try {
+    const payload = collectBuilderPayload();
+    lastBuilderRequestPayload = payload;
     const res = await fetch("/api/builder/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(collectBuilderPayload())
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) {
@@ -1744,6 +1877,35 @@ builderSendBtn.addEventListener("click", async () => {
     setSaveStatus(msg, "error");
   } finally {
     builderSendBtn.disabled = false;
+  }
+});
+
+builderDebugBtn.addEventListener("click", async () => {
+  if (builderDebugLoading || !features.aiEnabled) {
+    return;
+  }
+  const status = Number(lastBuilderResponse?.status || 0);
+  if (status < 400) {
+    return;
+  }
+
+  const request = toBuilderDebugRequest(lastBuilderRequestPayload);
+  const response = toBuilderDebugResponse(lastBuilderResponse);
+  if (!request || !response) {
+    setSaveStatus("Nothing to debug yet.", "error");
+    return;
+  }
+
+  builderDebugLoading = true;
+  renderBuilderDebugState();
+  try {
+    builderDebugAnalysis = await runAiDebug(request, response);
+    renderBuilderDebugState();
+  } catch (_error) {
+    setSaveStatus("AI debug failed.", "error");
+  } finally {
+    builderDebugLoading = false;
+    renderBuilderDebugState();
   }
 });
 
@@ -1922,6 +2084,8 @@ collectionsMountEl.addEventListener("click", async (event) => {
     if (!cid || !rid) {
       return;
     }
+    const col = collections.find((c) => c.id === cid);
+    const req = col?.requests?.find((r) => r.id === rid);
     const res = await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}/run`, {
       method: "POST"
     });
@@ -1930,6 +2094,17 @@ collectionsMountEl.addEventListener("click", async (event) => {
       setSaveStatus(data.error || "Run failed.", "error");
       return;
     }
+    const requestBody = {
+      method: req?.method || "GET",
+      url: req?.url || "",
+      headers: req?.headers || [],
+      body: req?.bodyText || "",
+      bodyFormat: req?.bodyFormat || "json",
+      formFields: req?.formFields || [],
+      params: req?.params || [],
+      auth: req?.auth || { type: "NONE" }
+    };
+    lastBuilderRequestPayload = requestBody;
     showBuilderResponse(data);
     return;
   }

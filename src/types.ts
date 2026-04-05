@@ -41,6 +41,8 @@ export interface RequestLog {
   forwardError: string | null;
   note: string;
   replayed: boolean;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
   durationMs?: number;
 }
 

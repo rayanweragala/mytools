@@ -1406,6 +1406,70 @@ textarea:focus {
   font-size: 0.82rem;
 }
 
+.builder-debug-section {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.ai-debug-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  border-color: color-mix(in srgb, var(--status-5xx) 45%, var(--status-4xx));
+  background: color-mix(in srgb, var(--status-5xx) 14%, var(--surface-alt));
+  color: #ffd6dc;
+  box-shadow: var(--shadow-inset);
+}
+
+.ai-debug-btn:hover {
+  background: color-mix(in srgb, var(--status-5xx) 20%, var(--surface-alt));
+}
+
+.ai-debug-result {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-debug-label {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  color: var(--text-dim);
+  font-weight: 700;
+  opacity: 0;
+  animation: aiFadeIn 220ms ease forwards;
+}
+
+.ai-debug-box {
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 46%, var(--border));
+  background: color-mix(in srgb, var(--surface-alt) 82%, transparent);
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.ai-debug-block {
+  display: grid;
+  gap: 8px;
+}
+
+@keyframes aiFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Modals */
 
 .modal-backdrop {

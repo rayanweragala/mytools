@@ -7,6 +7,7 @@ import * as ngrok from "ngrok";
 import {
   ANALYSIS_SYSTEM_PROMPT,
   CURL_TO_REQUEST_SYSTEM_PROMPT,
+  DEBUG_SYSTEM_PROMPT,
   PAYLOAD_SYSTEM_PROMPT,
   REQUEST_TO_CURL_SYSTEM_PROMPT,
   buildPrompt,
@@ -910,6 +911,13 @@ app.post("/api/environments/active", (req: Request, res: Response) => {
   res.json({ success: true, activeEnvironmentId: environmentsStore.listForApi().activeEnvironmentId });
 });
 
+function asDebugObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
 app.post("/api/ai/generate", aiLimiter, async (req: Request, res: Response) => {
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
   const context = typeof req.body?.context === "string" ? req.body.context : undefined;
@@ -966,6 +974,29 @@ app.post("/api/ai/analyze-log", aiLimiter, async (req: Request, res: Response) =
   } catch (e) {
     const msg = e instanceof Error ? e.message : "analysis failed";
     res.json({ result: "", error: msg });
+  }
+});
+
+app.post("/api/ai/debug", aiLimiter, async (req: Request, res: Response) => {
+  const requestObject = asDebugObject((req.body as { request?: unknown })?.request);
+  const responseObject = asDebugObject((req.body as { response?: unknown })?.response);
+  if (!requestObject || !responseObject) {
+    res.status(400).json({ success: false, error: "request and response objects are required" });
+    return;
+  }
+
+  const debugPrompt = buildPrompt(
+    DEBUG_SYSTEM_PROMPT,
+    `Request:\n${JSON.stringify(requestObject, null, 2)}`,
+    `Response:\n${JSON.stringify(responseObject, null, 2)}`
+  );
+
+  try {
+    const analysis = cleanAiText(await generate(debugPrompt));
+    res.json({ success: true, analysis });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "debug analysis failed";
+    res.status(502).json({ success: false, error: message });
   }
 });
 
@@ -1264,6 +1295,11 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       forwardError: null,
       note: "chaos injection",
       replayed,
+      responseHeaders: { "Content-Type": "application/json" },
+      responseBody: {
+        error: "chaos",
+        message: "Chaos mode injected this failure"
+      },
       durationMs: Date.now() - t0
     });
     maybeForward(logId);
@@ -1291,6 +1327,8 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       forwardError: null,
       note: "Auth failed",
       replayed,
+      responseHeaders: { "Content-Type": "application/json" },
+      responseBody: { status: "unauthorized", endpoint },
       durationMs: Date.now() - t0
     });
     maybeForward(logId);
@@ -1323,6 +1361,8 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     forwardError: null,
     note: cfg.statusCodes && cfg.statusCodes.length > 0 ? "Sequence status code used" : "Configured status code used",
     replayed,
+    responseHeaders: cfg.responseHeaders || {},
+    responseBody: responsePayload,
     durationMs: Date.now() - t0
   });
   maybeForward(logId);

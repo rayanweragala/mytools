@@ -313,6 +313,16 @@
               <span id="respMeta" class="response-meta"></span>
               <button type="button" id="respCopyBtn" class="btn btn-glass btn-micro">Copy body</button>
             </div>
+            <div id="builderDebugSection" class="builder-debug-section is-hidden">
+              <button type="button" id="builderDebugBtn" class="btn btn-glass btn-micro ai-debug-btn">
+                <span id="builderDebugBtnText">Debug with AI</span>
+                <span id="builderDebugSpinner" class="ai-spinner is-hidden" aria-hidden="true"></span>
+              </button>
+              <div id="builderDebugResult" class="ai-debug-result is-hidden">
+                <p id="builderDebugLabel" class="ai-debug-label">AI Analysis</p>
+                <div id="builderDebugText" class="ai-debug-box"></div>
+              </div>
+            </div>
             <div class="response-subtabs">
               <button type="button" class="resp-subtab is-active" data-resptab="body">Body</button>
               <button type="button" class="resp-subtab" data-resptab="headers">Headers</button>

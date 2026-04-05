@@ -12,6 +12,13 @@ export const ANALYSIS_SYSTEM_PROMPT =
   "Point out anything unusual, errors, or what the response means. " +
   "Be concise — max 4 sentences.";
 
+export const DEBUG_SYSTEM_PROMPT =
+  "You are an API debugging assistant inside a developer tool. " +
+  "A developer got an unexpected HTTP response. Analyze the request and response. " +
+  "Be direct and brief — max 5 sentences. " +
+  "Tell them exactly what went wrong and one specific thing to fix. " +
+  "Do not repeat the request back to them.";
+
 export const CURL_TO_REQUEST_SYSTEM_PROMPT =
   "You are an API tool assistant. Convert the given curl command into " +
   "a JSON object with these exact fields: " +

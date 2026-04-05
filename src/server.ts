@@ -203,10 +203,19 @@ function canIncludeBody(method: string): boolean {
   return upperMethod !== "GET" && upperMethod !== "HEAD";
 }
 
-function buildReplayHeaders(headers: HeaderMap): Record<string, string> {
-  const replayHeaders: Record<string, string> = {};
-  normalizeHeaders(headers).forEach(([key, value]) => {
-    replayHeaders[key] = value;
+function buildReplayHeaders(headers: HeaderMap): Headers {
+  const replayHeaders = new Headers();
+  Object.entries(headers).forEach(([key, value]) => {
+    if (value === undefined || blockedReplayHeaders.has(key.toLowerCase())) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => replayHeaders.append(key, String(entry)));
+      return;
+    }
+
+    replayHeaders.append(key, String(value));
   });
   return replayHeaders;
 }
@@ -306,7 +315,8 @@ app.post("/api/tunnel/start", async (_req, res) => {
     });
 
     res.json({ active: true, url: tunnelUrl });
-  } catch (_error) {
+  } catch (error) {
+    console.error("Failed to start tunnel:", error);
     tunnelUrl = null;
     res.status(500).json({ active: false, url: null, error: "Failed to start tunnel" });
   }

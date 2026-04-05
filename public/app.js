@@ -31,6 +31,9 @@ const envManageBtn = document.getElementById("envManageBtn");
 const builderMethodEl = document.getElementById("builderMethod");
 const builderUrlEl = document.getElementById("builderUrl");
 const builderUrlHighlightEl = document.getElementById("builderUrlHighlight");
+const builderImportCurlBtn = document.getElementById("builderImportCurlBtn");
+const builderCopyCurlBtn = document.getElementById("builderCopyCurlBtn");
+const builderCopyCurlTooltipEl = document.getElementById("builderCopyCurlTooltip");
 const builderSaveBtn = document.getElementById("builderSaveBtn");
 const builderSendBtn = document.getElementById("builderSendBtn");
 const headersRowsEl = document.getElementById("headersRows");
@@ -82,6 +85,10 @@ const saveRequestModalEl = document.getElementById("saveRequestModal");
 const saveReqCollectionEl = document.getElementById("saveReqCollection");
 const saveReqNameEl = document.getElementById("saveReqName");
 const saveReqConfirmBtn = document.getElementById("saveReqConfirmBtn");
+const curlImportModalEl = document.getElementById("curlImportModal");
+const curlImportInputEl = document.getElementById("curlImportInput");
+const curlImportErrorEl = document.getElementById("curlImportError");
+const curlImportConvertBtn = document.getElementById("curlImportConvertBtn");
 
 const envModalEl = document.getElementById("envModal");
 const newEnvBtn = document.getElementById("newEnvBtn");
@@ -122,6 +129,7 @@ let tunnelState = { active: false, url: null };
 let chaosState = { enabled: false, failureRate: 0 };
 let tunnelBusy = false;
 let tooltipTimer = null;
+let builderTooltipTimer = null;
 
 let features = { aiEnabled: false, ngrokEnabled: false };
 
@@ -166,6 +174,29 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function enabledRowsToRecord(rows) {
+  const record = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.enabled === false) {
+      continue;
+    }
+    const key = String(row?.key || "").trim();
+    if (!key) {
+      continue;
+    }
+    record[key] = String(row?.value ?? "");
+  }
+  return record;
+}
+
+function recordToRows(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return [defaultRow()];
+  }
+  const rows = Object.entries(record).map(([key, value]) => ({ key, value: String(value ?? ""), enabled: true }));
+  return rows.length ? rows : [defaultRow()];
 }
 
 function prettyJson(input) {
@@ -572,6 +603,18 @@ function showCopyTooltip(text) {
   }, 1200);
 }
 
+function showBuilderCopyCurlTooltip(text, type = "success") {
+  builderCopyCurlTooltipEl.textContent = text;
+  builderCopyCurlTooltipEl.classList.toggle("is-error", type === "error");
+  if (builderTooltipTimer) {
+    clearTimeout(builderTooltipTimer);
+  }
+  builderTooltipTimer = setTimeout(() => {
+    builderCopyCurlTooltipEl.textContent = "";
+    builderCopyCurlTooltipEl.classList.remove("is-error");
+  }, 1400);
+}
+
 /* --- Main tabs --- */
 
 function getMainTab() {
@@ -955,6 +998,13 @@ function openModal(kind) {
     envModalEl.classList.remove("is-hidden");
     renderEnvModalList();
   }
+  if (kind === "curl-import") {
+    curlImportErrorEl.classList.add("is-hidden");
+    curlImportErrorEl.textContent = "";
+    curlImportModalEl.hidden = false;
+    curlImportModalEl.classList.remove("is-hidden");
+    queueMicrotask(() => curlImportInputEl?.focus());
+  }
 }
 
 function closeEnvPrompt(result = null) {
@@ -977,6 +1027,10 @@ function closeModals() {
   modalBackdropEl.classList.add("is-hidden");
   saveRequestModalEl.hidden = true;
   saveRequestModalEl.classList.add("is-hidden");
+  curlImportModalEl.hidden = true;
+  curlImportModalEl.classList.add("is-hidden");
+  curlImportErrorEl.classList.add("is-hidden");
+  curlImportErrorEl.textContent = "";
   envModalEl.hidden = true;
   envModalEl.classList.add("is-hidden");
   closeEnvPrompt();
@@ -1133,6 +1187,66 @@ async function runAiGenerate(prompt, context) {
     throw new Error(data.error || "AI error");
   }
   return data.result;
+}
+
+async function runCurlImport(curlText) {
+  const res = await fetch("/api/ai/curl-to-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ curl: curlText })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success || !data.request) {
+    throw new Error(data.error || "Could not parse curl command");
+  }
+  return data.request;
+}
+
+function applyImportedCurlRequest(request) {
+  const bodyText = typeof request.body === "string" ? request.body : prettyJson(request.body ?? "");
+  const normalizedBody = bodyText.trim();
+  let bodyFormat = "text";
+  if (!normalizedBody) {
+    bodyFormat = "json";
+  } else {
+    try {
+      JSON.parse(normalizedBody);
+      bodyFormat = "json";
+    } catch (_error) {
+      bodyFormat = "text";
+    }
+  }
+
+  applyBuilderSnapshot({
+    method: request.method || "GET",
+    url: request.url || "",
+    headers: recordToRows(request.headers),
+    params: recordToRows(request.params),
+    bodyFormat,
+    bodyText,
+    formFields: [defaultRow()],
+    auth: { type: "NONE" }
+  });
+}
+
+async function runRequestToCurl(payload) {
+  const body = {
+    method: payload.method,
+    url: payload.url,
+    headers: enabledRowsToRecord(payload.headers),
+    body: payload.body,
+    params: enabledRowsToRecord(payload.params)
+  };
+  const res = await fetch("/api/ai/request-to-curl", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success || typeof data.curl !== "string") {
+    throw new Error(data.error || "Could not generate curl command");
+  }
+  return data.curl;
 }
 
 endpointTabsEl.addEventListener("click", (event) => {
@@ -1487,6 +1601,60 @@ document.querySelectorAll(".builder-subtab").forEach((btn) => {
 
 builderUrlEl.addEventListener("input", () => {
   syncParamsFromUrlField();
+});
+
+builderImportCurlBtn.addEventListener("click", () => {
+  curlImportInputEl.value = "";
+  curlImportErrorEl.classList.add("is-hidden");
+  curlImportErrorEl.textContent = "";
+  openModal("curl-import");
+});
+
+curlImportConvertBtn.addEventListener("click", async () => {
+  const curlText = String(curlImportInputEl.value || "").trim();
+  if (!curlText) {
+    curlImportErrorEl.textContent = "paste your curl command here...";
+    curlImportErrorEl.classList.remove("is-hidden");
+    return;
+  }
+
+  curlImportConvertBtn.disabled = true;
+  curlImportConvertBtn.textContent = "Converting…";
+  curlImportErrorEl.classList.add("is-hidden");
+  curlImportErrorEl.textContent = "";
+
+  try {
+    const request = await runCurlImport(curlText);
+    applyImportedCurlRequest(request);
+    closeModals();
+    setSaveStatus("Curl request imported.", "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not parse curl command";
+    curlImportErrorEl.textContent = message;
+    curlImportErrorEl.classList.remove("is-hidden");
+  } finally {
+    curlImportConvertBtn.disabled = false;
+    curlImportConvertBtn.textContent = "Convert";
+  }
+});
+
+builderCopyCurlBtn.addEventListener("click", async () => {
+  const payload = collectBuilderPayload();
+  if (!String(payload.url || "").trim()) {
+    showBuilderCopyCurlTooltip("add a URL first", "error");
+    return;
+  }
+
+  builderCopyCurlBtn.disabled = true;
+  try {
+    const curl = await runRequestToCurl(payload);
+    await copyText(curl);
+    showBuilderCopyCurlTooltip("copied");
+  } catch (_error) {
+    showBuilderCopyCurlTooltip("copy failed", "error");
+  } finally {
+    builderCopyCurlBtn.disabled = false;
+  }
 });
 
 addHeaderRowBtn.addEventListener("click", () => {

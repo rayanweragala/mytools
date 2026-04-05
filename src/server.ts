@@ -4,7 +4,17 @@ import path from "path";
 import { fileURLToPath } from "url";
 import rateLimit from "express-rate-limit";
 import * as ngrok from "ngrok";
-import { ANALYSIS_SYSTEM_PROMPT, PAYLOAD_SYSTEM_PROMPT, generate, getAiFeatures } from "./ai.js";
+import {
+  ANALYSIS_SYSTEM_PROMPT,
+  CURL_TO_REQUEST_SYSTEM_PROMPT,
+  PAYLOAD_SYSTEM_PROMPT,
+  REQUEST_TO_CURL_SYSTEM_PROMPT,
+  buildPrompt,
+  cleanAiJson,
+  cleanAiText,
+  generate,
+  getAiFeatures
+} from "./ai.js";
 import { executeBuilderSend, payloadFromSaved } from "./builderHttp.js";
 import { collectionsStore } from "./collectionsStore.js";
 import { environmentsStore } from "./environmentsStore.js";
@@ -89,6 +99,117 @@ interface BuilderHistoryEntry {
   auth: BuilderAuthPayload;
   status: number;
   durationMs: number;
+}
+
+interface AiCurlRequestShape {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+  params: Record<string, string>;
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = typeof entry === "string" ? entry : String(entry ?? "");
+  }
+  return out;
+}
+
+function normalizeAiCurlRequest(value: unknown): AiCurlRequestShape | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const method = typeof record.method === "string" ? record.method.trim().toUpperCase() : "";
+  const url = typeof record.url === "string" ? record.url.trim() : "";
+  if (!method || !url) {
+    return null;
+  }
+  return {
+    method,
+    url,
+    headers: toStringRecord(record.headers),
+    body: typeof record.body === "string" ? record.body : record.body == null ? "" : JSON.stringify(record.body),
+    params: toStringRecord(record.params)
+  };
+}
+
+function buildRowsFromRecord(record: Record<string, string>): KeyValueEnabled[] {
+  const rows = Object.entries(record).map(([key, value]) => ({ key, value, enabled: true }));
+  return rows.length ? rows : [{ key: "", value: "", enabled: true }];
+}
+
+function mergeUrlAndParams(url: string, params: Record<string, string>): string {
+  try {
+    const target = new URL(url);
+    Object.entries(params).forEach(([key, value]) => {
+      target.searchParams.set(key, value);
+    });
+    return target.toString();
+  } catch {
+    return url;
+  }
+}
+
+function aiRequestToBuilderSnapshot(request: AiCurlRequestShape) {
+  return {
+    method: request.method,
+    url: mergeUrlAndParams(request.url, request.params),
+    headers: buildRowsFromRecord(request.headers),
+    bodyFormat: "json",
+    bodyText: request.body,
+    formFields: [{ key: "", value: "", enabled: true }],
+    params: buildRowsFromRecord(request.params),
+    auth: { type: "NONE" }
+  };
+}
+
+function builderPayloadToAiCurlRequest(payload: BuilderSendPayload): AiCurlRequestShape {
+  const headers: Record<string, string> = {};
+  const params: Record<string, string> = {};
+
+  for (const row of Array.isArray(payload.headers) ? payload.headers : []) {
+    if (row.enabled === false) {
+      continue;
+    }
+    const key = String(row.key || "").trim();
+    if (!key) {
+      continue;
+    }
+    headers[key] = String(row.value ?? "");
+  }
+
+  for (const row of Array.isArray(payload.params) ? payload.params : []) {
+    if (row.enabled === false) {
+      continue;
+    }
+    const key = String(row.key || "").trim();
+    if (!key) {
+      continue;
+    }
+    params[key] = String(row.value ?? "");
+  }
+
+  return {
+    method: String(payload.method || "GET").toUpperCase(),
+    url: String(payload.url || "").trim(),
+    headers,
+    body: typeof payload.body === "string" ? payload.body : "",
+    params
+  };
+}
+
+function buildCurlToRequestPrompt(curl: string): string {
+  return buildPrompt(CURL_TO_REQUEST_SYSTEM_PROMPT, curl);
+}
+
+function buildRequestToCurlPrompt(request: AiCurlRequestShape): string {
+  return buildPrompt(REQUEST_TO_CURL_SYSTEM_PROMPT, JSON.stringify(request, null, 2));
 }
 
 const builderHistory: BuilderHistoryEntry[] = [];
@@ -845,6 +966,43 @@ app.post("/api/ai/analyze-log", aiLimiter, async (req: Request, res: Response) =
   } catch (e) {
     const msg = e instanceof Error ? e.message : "analysis failed";
     res.json({ result: "", error: msg });
+  }
+});
+
+app.post("/api/ai/curl-to-request", aiLimiter, async (req: Request, res: Response) => {
+  const curl = typeof req.body?.curl === "string" ? req.body.curl.trim() : "";
+  if (!curl) {
+    res.status(400).json({ success: false, error: "curl is required" });
+    return;
+  }
+
+  try {
+    const result = await generate(buildCurlToRequestPrompt(curl));
+    const parsed = cleanAiJson<unknown>(result);
+    const request = normalizeAiCurlRequest(parsed);
+    if (!request) {
+      res.json({ success: false, error: "Could not parse curl command" });
+      return;
+    }
+    res.json({ success: true, request });
+  } catch (_error) {
+    res.json({ success: false, error: "Could not parse curl command" });
+  }
+});
+
+app.post("/api/ai/request-to-curl", aiLimiter, async (req: Request, res: Response) => {
+  const request = normalizeAiCurlRequest(req.body) || builderPayloadToAiCurlRequest(req.body as BuilderSendPayload);
+  if (!request.url) {
+    res.status(400).json({ success: false, error: "url is required" });
+    return;
+  }
+
+  try {
+    const result = await generate(buildRequestToCurlPrompt(request));
+    res.json({ success: true, curl: cleanAiText(result) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "curl generation failed";
+    res.status(502).json({ success: false, error: message });
   }
 });
 

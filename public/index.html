@@ -204,6 +204,11 @@
               <input id="builderUrl" type="text" class="builder-url-input" placeholder="https://api.example.com/v1/resource" spellcheck="false" />
               <div id="builderUrlHighlight" class="builder-url-highlight is-hidden" aria-hidden="true"></div>
             </div>
+            <div class="builder-request-actions">
+              <button type="button" id="builderImportCurlBtn" class="btn btn-glass btn-tiny builder-action-btn">Import curl</button>
+              <button type="button" id="builderCopyCurlBtn" class="btn btn-glass btn-tiny builder-action-btn">Copy as curl</button>
+              <span id="builderCopyCurlTooltip" class="copy-tooltip builder-copy-tooltip" role="status" aria-live="polite"></span>
+            </div>
             <button type="button" id="builderSaveBtn" class="btn btn-glass">Save</button>
             <button type="button" id="builderSendBtn" class="btn btn-primary">Send</button>
           </div>
@@ -348,6 +353,24 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-glass" data-close-modal="save">Cancel</button>
         <button type="button" id="saveReqConfirmBtn" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+
+    <div id="curlImportModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="curlImportTitle" hidden>
+      <div class="modal-header">
+        <h2 id="curlImportTitle" class="modal-title">Import from curl</h2>
+        <button type="button" class="btn btn-glass btn-icon modal-close curl-import-close" data-close-modal="curl-import" aria-label="Close curl import">×</button>
+      </div>
+      <div class="modal-body curl-import-body">
+        <label class="field curl-import-field">
+          <span>curl command</span>
+          <textarea id="curlImportInput" class="curl-import-textarea" rows="10" placeholder="paste your curl command here..." spellcheck="false"></textarea>
+        </label>
+        <p id="curlImportError" class="inline-error curl-import-error is-hidden" role="alert"></p>
+      </div>
+      <div class="modal-footer curl-import-footer">
+        <button type="button" class="btn btn-glass" data-close-modal="curl-import">Cancel</button>
+        <button type="button" id="curlImportConvertBtn" class="btn btn-primary">Convert</button>
       </div>
     </div>
 

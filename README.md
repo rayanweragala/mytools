@@ -6,6 +6,10 @@ It is great for auth failures, retry sequences, delayed responses, and replay te
 
 You get request replay, embedded ngrok controls, and persisted endpoint configs (`data/config.json`).
 
+## Data
+
+`data/` is gitignored. Config is local to your machine.
+
 ## Run it
 
 ```bash
@@ -27,7 +31,7 @@ No token? Tunnel start still attempts to run.
 ## Endpoint behavior controls
 
 Each endpoint tab has its own auth mode (`NONE`, `API_KEY`, `BEARER`), status code,
-retry sequence (`503,503,200`), response delay, response headers JSON, and response body.
+retry sequence (`503,503,200`), response delay, response headers JSON, response body, and optional forward URL.
 
 ## API quick reference
 

@@ -22,6 +22,7 @@
         <span class="chaos-pulse" id="chaosPulse" aria-hidden="true"></span>
       </div>
       <div class="topbar-right">
+        <button id="chatToggleBtn" class="btn btn-glass btn-icon chat-toggle-btn" type="button" aria-label="Open assistant">✦</button>
         <button id="tunnelToggleBtn" class="btn btn-primary" type="button">Start Tunnel</button>
         <button id="tunnelUrl" class="tunnel-url" type="button" title="Copy tunnel URL">Tunnel inactive</button>
         <span id="tunnelCopyTooltip" class="copy-tooltip" role="status" aria-live="polite"></span>
@@ -342,6 +343,23 @@
         </section>
       </div>
     </div>
+
+    <aside id="chatPanel" class="chat-panel is-hidden" hidden>
+      <div class="chat-panel-header">
+        <h2 class="chat-panel-title">Ask mytools</h2>
+        <button type="button" id="chatCloseBtn" class="btn btn-glass btn-icon chat-close-btn" aria-label="Close assistant">×</button>
+      </div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div id="chatSuggestions" class="chat-suggestions">
+        <button type="button" class="chat-chip" data-chat-suggestion="What endpoints do I have configured?">What endpoints do I have configured?</button>
+        <button type="button" class="chat-chip" data-chat-suggestion="Show me my recent failed requests">Show me my recent failed requests</button>
+        <button type="button" class="chat-chip" data-chat-suggestion="What collections have I saved?">What collections have I saved?</button>
+      </div>
+      <div class="chat-input-bar">
+        <textarea id="chatInput" class="chat-input" rows="1" placeholder="Ask about your current state..." spellcheck="false"></textarea>
+        <button type="button" id="chatSendBtn" class="btn btn-primary btn-icon chat-send-btn" aria-label="Send">➤</button>
+      </div>
+    </aside>
 
     <div id="modalBackdrop" class="modal-backdrop is-hidden" hidden></div>
 

@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -114,6 +115,11 @@ interface AiGeneratedTestCaseShape extends AiCurlRequestShape {
   name: string;
 }
 
+interface AiChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 const TEST_CASES_SYSTEM_PROMPT =
   "You are an API testing assistant. Given an HTTP request, generate " +
   "exactly 6 test case variations as a JSON array. Each variation tests " +
@@ -122,6 +128,15 @@ const TEST_CASES_SYSTEM_PROMPT =
   "Return only a JSON array of objects, each with: " +
   "{ name: string, method, url, headers, body, params } " +
   "No explanation. No markdown. Just the raw JSON array.";
+
+const CHAT_SYSTEM_PROMPT =
+  "You are a helpful assistant inside a developer API tool called mytools. " +
+  "You have access to the user's current app state shown below. " +
+  "Answer questions about their requests, collections, logs, and endpoints. " +
+  "Be brief and direct. If you don't know something, say so. " +
+  "Never make up endpoint paths or request data that isn't in the context.";
+
+const chatSessions = new Map<string, AiChatTurn[]>();
 
 function toStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -974,6 +989,28 @@ function asDebugObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizeChatHistory(value: unknown): AiChatTurn[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return null;
+      }
+      const roleRaw = (entry as { role?: unknown }).role;
+      const contentRaw = (entry as { content?: unknown }).content;
+      const role = roleRaw === "user" || roleRaw === "assistant" ? roleRaw : null;
+      const content = typeof contentRaw === "string" ? contentRaw.trim() : "";
+      if (!role || !content) {
+        return null;
+      }
+      return { role, content } as AiChatTurn;
+    })
+    .filter((entry): entry is AiChatTurn => Boolean(entry))
+    .slice(-20);
+}
+
 app.post("/api/ai/generate", aiLimiter, async (req: Request, res: Response) => {
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
   const context = typeof req.body?.context === "string" ? req.body.context : undefined;
@@ -1053,6 +1090,40 @@ app.post("/api/ai/debug", aiLimiter, async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "debug analysis failed";
     res.status(502).json({ success: false, error: message });
+  }
+});
+
+app.post("/api/ai/chat", aiLimiter, async (req: Request, res: Response) => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  if (!message) {
+    res.status(400).json({ success: false, error: "message is required" });
+    return;
+  }
+
+  const sessionIdRaw = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+  const sessionId = sessionIdRaw || `chat_${randomUUID()}`;
+  const history = normalizeChatHistory((req.body as { history?: unknown }).history);
+  const context = asDebugObject((req.body as { context?: unknown }).context) || {};
+
+  const baseHistory: AiChatTurn[] = history.length > 0 ? history : chatSessions.get(sessionId) ?? [];
+  const historyLines = baseHistory.map((turn) => `${turn.role === "assistant" ? "Assistant" : "User"}: ${turn.content}`).join("\n\n");
+  const chatPrompt = buildPrompt(
+    CHAT_SYSTEM_PROMPT,
+    `Context JSON:\n${JSON.stringify(context, null, 2)}`,
+    historyLines ? `Conversation History:\n${historyLines}` : undefined,
+    `User: ${message}`
+  );
+
+  try {
+    const reply = cleanAiText(await generate(chatPrompt));
+    const userTurn: AiChatTurn = { role: "user", content: message };
+    const assistantTurn: AiChatTurn = { role: "assistant", content: reply };
+    const nextHistory: AiChatTurn[] = [...baseHistory, userTurn, assistantTurn].slice(-20);
+    chatSessions.set(sessionId, nextHistory);
+    res.json({ success: true, reply, sessionId });
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : "chat failed";
+    res.status(502).json({ success: false, error: messageText });
   }
 });
 

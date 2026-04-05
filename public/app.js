@@ -20,6 +20,13 @@ const tunnelToggleBtn = document.getElementById("tunnelToggleBtn");
 const tunnelUrlEl = document.getElementById("tunnelUrl");
 const tunnelCopyTooltipEl = document.getElementById("tunnelCopyTooltip");
 const simAiGenerateBtn = document.getElementById("simAiGenerateBtn");
+const chatToggleBtn = document.getElementById("chatToggleBtn");
+const chatPanelEl = document.getElementById("chatPanel");
+const chatCloseBtn = document.getElementById("chatCloseBtn");
+const chatMessagesEl = document.getElementById("chatMessages");
+const chatSuggestionsEl = document.getElementById("chatSuggestions");
+const chatInputEl = document.getElementById("chatInput");
+const chatSendBtn = document.getElementById("chatSendBtn");
 
 const tabSimulatorBtn = document.getElementById("tabSimulator");
 const tabBuilderBtn = document.getElementById("tabBuilder");
@@ -182,6 +189,10 @@ let envVarDraft = [];
 let envPromptResolver = null;
 
 let syncingParamsFromUrl = false;
+let chatOpen = false;
+let chatLoading = false;
+let chatSessionId = "";
+let chatHistory = [];
 
 function setSaveStatus(message, type = "info") {
   saveStatusEl.textContent = message;
@@ -776,6 +787,133 @@ function showToast(message, type = "success") {
 function bodyPreview(body) {
   const text = typeof body === "string" ? body : prettyJson(body ?? "");
   return text.trim() || "(empty)";
+}
+
+function trimChatHistory() {
+  if (chatHistory.length > 20) {
+    chatHistory = chatHistory.slice(-20);
+  }
+}
+
+function renderChatContent(text) {
+  const blocks = [];
+  let rendered = String(text || "").replace(/```([\s\S]*?)```/g, (_match, code) => {
+    const token = `@@CHAT_BLOCK_${blocks.length}@@`;
+    blocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
+    return token;
+  });
+
+  rendered = escapeHtml(rendered).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>");
+  blocks.forEach((html, idx) => {
+    rendered = rendered.replace(`@@CHAT_BLOCK_${idx}@@`, html);
+  });
+  return rendered;
+}
+
+function buildChatContext() {
+  const activeEnvName = environmentsList.find((env) => env.id === activeEnvironmentId)?.name || null;
+  const recentLogSummary = (appState?.logs || []).slice(0, 10).map((entry) => ({
+    method: entry.method,
+    path: entry.path,
+    status: entry.returnedStatusCode,
+    timestamp: entry.timestamp
+  }));
+  const currentUrl = String(builderUrlEl.value || "").trim();
+  return {
+    endpointKeys: appState?.endpointKeys || [],
+    collectionNames: collections.map((collection) => collection.name),
+    recentLogSummary,
+    activeEnvironment: activeEnvName,
+    builderCurrentRequest: currentUrl ? { method: builderMethodEl.value, url: currentUrl } : null
+  };
+}
+
+function renderChatMessages() {
+  const hasMessages = chatHistory.length > 0;
+  chatSuggestionsEl.classList.toggle("is-hidden", hasMessages || chatLoading);
+  if (!hasMessages && !chatLoading) {
+    chatMessagesEl.innerHTML = "";
+    return;
+  }
+
+  const messagesHtml = chatHistory
+    .map((message) => {
+      const roleClass = message.role === "user" ? "chat-msg-user" : "chat-msg-ai";
+      return `<article class="chat-message ${roleClass}"><div class="chat-bubble">${renderChatContent(message.content)}</div></article>`;
+    })
+    .join("");
+
+  const typingHtml = chatLoading
+    ? `
+      <article class="chat-message chat-msg-ai">
+        <div class="chat-bubble chat-typing">
+          <span></span><span></span><span></span>
+        </div>
+      </article>`
+    : "";
+
+  chatMessagesEl.innerHTML = `${messagesHtml}${typingHtml}`;
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+function setChatOpen(nextOpen) {
+  chatOpen = Boolean(nextOpen);
+  chatPanelEl.classList.toggle("is-hidden", !chatOpen);
+  chatPanelEl.toggleAttribute("hidden", !chatOpen);
+  if (chatOpen) {
+    queueMicrotask(() => chatInputEl?.focus());
+    renderChatMessages();
+  }
+}
+
+function autoGrowChatInput() {
+  chatInputEl.style.height = "auto";
+  const maxHeight = 24 * 4 + 16;
+  chatInputEl.style.height = `${Math.min(chatInputEl.scrollHeight, maxHeight)}px`;
+}
+
+async function sendChatMessage(rawMessage) {
+  const message = String(rawMessage || "").trim();
+  if (!message || chatLoading) {
+    return;
+  }
+
+  chatHistory.push({ role: "user", content: message });
+  trimChatHistory();
+  chatLoading = true;
+  chatInputEl.value = "";
+  autoGrowChatInput();
+  renderChatMessages();
+
+  try {
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        history: chatHistory,
+        context: buildChatContext(),
+        sessionId: chatSessionId || undefined
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success || typeof data.reply !== "string") {
+      throw new Error(data.error || "Chat failed");
+    }
+    chatSessionId = typeof data.sessionId === "string" ? data.sessionId : chatSessionId;
+    chatHistory.push({ role: "assistant", content: data.reply });
+    trimChatHistory();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Chat failed", "error");
+    chatHistory.push({
+      role: "assistant",
+      content: "I couldn't complete that just now. Please try again."
+    });
+    trimChatHistory();
+  } finally {
+    chatLoading = false;
+    renderChatMessages();
+  }
 }
 
 /* --- Main tabs --- */
@@ -1814,6 +1952,39 @@ tunnelUrlEl.addEventListener("click", async () => {
   }
 });
 
+chatToggleBtn.addEventListener("click", () => {
+  setChatOpen(!chatOpen);
+});
+
+chatCloseBtn.addEventListener("click", () => {
+  setChatOpen(false);
+});
+
+chatSuggestionsEl.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const chip = target.closest("[data-chat-suggestion]");
+  if (!(chip instanceof HTMLButtonElement)) {
+    return;
+  }
+  const message = chip.dataset.chatSuggestion || "";
+  void sendChatMessage(message);
+});
+
+chatInputEl.addEventListener("input", autoGrowChatInput);
+chatInputEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    void sendChatMessage(chatInputEl.value);
+  }
+});
+
+chatSendBtn.addEventListener("click", () => {
+  void sendChatMessage(chatInputEl.value);
+});
+
 /* --- Main tab listeners --- */
 
 tabSimulatorBtn.addEventListener("click", () => setMainTab("simulator"));
@@ -2492,6 +2663,8 @@ async function bootstrap() {
   setBuilderSubtab("headers");
   setBodyFormatUi();
   syncBuilderAuthUi();
+  autoGrowChatInput();
+  renderChatMessages();
 }
 
 bootstrap();

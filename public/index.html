@@ -9,6 +9,18 @@
   <body>
     <header class="topbar">
       <div class="brand">webhooks</div>
+      <div class="chaos-controls" id="chaosControls">
+        <label class="chaos-toggle" for="chaosEnabled">
+          <input id="chaosEnabled" type="checkbox" />
+          <span class="chaos-slider" aria-hidden="true"></span>
+          <span>Chaos</span>
+        </label>
+        <label class="chaos-rate-wrap" id="chaosRateWrap">
+          <span>% fail rate</span>
+          <input id="chaosRate" type="number" min="0" max="100" />
+        </label>
+        <span class="chaos-pulse" id="chaosPulse" aria-hidden="true"></span>
+      </div>
       <div class="topbar-right">
         <button id="tunnelToggleBtn" class="btn btn-primary" type="button">Start Tunnel</button>
         <button id="tunnelUrl" class="tunnel-url" type="button" title="Copy tunnel URL">Tunnel inactive</button>

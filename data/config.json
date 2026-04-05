@@ -45,5 +45,9 @@
     "call-answer",
     "call-end"
   ],
-  "profiles": []
+  "profiles": [],
+  "chaos": {
+    "enabled": false,
+    "failureRate": 0
+  }
 }

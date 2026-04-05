@@ -499,6 +499,27 @@ app.post("/api/profiles/:id/load", (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+app.get("/api/chaos", (_req, res) => {
+  res.json(store.getChaos());
+});
+
+app.post("/api/chaos", (req: Request, res: Response) => {
+  const enabled = req.body?.enabled;
+  const failureRate = Number(req.body?.failureRate);
+  if (typeof enabled !== "boolean" || !Number.isFinite(failureRate)) {
+    res.status(400).json({ error: "Invalid chaos config" });
+    return;
+  }
+
+  const normalizedFailureRate = Math.max(0, Math.min(100, Math.trunc(failureRate)));
+  const chaosConfig = {
+    enabled,
+    failureRate: normalizedFailureRate
+  };
+  store.updateChaos(chaosConfig);
+  res.json(chaosConfig);
+});
+
 app.post("/api/logs/clear", (_req, res) => {
   store.clearLogs();
   res.json({ success: true });
@@ -658,10 +679,32 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
 
   const { configs } = store.getState();
   const cfg = configs[endpoint];
-  const authValid = validateAuth(req, cfg);
   const rawBody = getRawRequestBody(request);
   const replayed = consumeReplaySignature(buildReplaySignature(req.method, req.originalUrl, req.headers, rawBody));
+  const chaosConfig = store.getChaos();
+  if (chaosConfig.enabled && Math.random() * 100 < chaosConfig.failureRate) {
+    store.addLog({
+      endpoint,
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: req.originalUrl,
+      headers: req.headers,
+      body: getLogBody(request),
+      rawBody,
+      authValid: true,
+      returnedStatusCode: 503,
+      note: "chaos injection",
+      replayed
+    });
 
+    res.status(503).json({
+      error: "chaos",
+      message: "Chaos mode injected this failure"
+    });
+    return;
+  }
+
+  const authValid = validateAuth(req, cfg);
   if (!authValid) {
     store.addLog({
       endpoint,

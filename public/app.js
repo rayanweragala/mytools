@@ -11,6 +11,11 @@ const saveBtn = document.getElementById("saveBtn");
 const profileNameInput = document.getElementById("profileNameInput");
 const saveProfileBtn = document.getElementById("saveProfileBtn");
 const profilesListEl = document.getElementById("profilesList");
+const chaosControlsEl = document.getElementById("chaosControls");
+const chaosEnabledEl = document.getElementById("chaosEnabled");
+const chaosRateWrapEl = document.getElementById("chaosRateWrap");
+const chaosRateEl = document.getElementById("chaosRate");
+const chaosPulseEl = document.getElementById("chaosPulse");
 const tunnelToggleBtn = document.getElementById("tunnelToggleBtn");
 const tunnelUrlEl = document.getElementById("tunnelUrl");
 const tunnelCopyTooltipEl = document.getElementById("tunnelCopyTooltip");
@@ -36,6 +41,7 @@ const fields = {
 let appState = null;
 let selectedEndpoint = "incoming-call";
 let tunnelState = { active: false, url: null };
+let chaosState = { enabled: false, failureRate: 0 };
 let tunnelBusy = false;
 let tooltipTimer = null;
 
@@ -86,6 +92,14 @@ function normalizeStatusCodes(rawValue) {
     .split(",")
     .map((token) => parseInt(token.trim(), 10))
     .filter((value) => !Number.isNaN(value));
+}
+
+function normalizeFailureRate(rawValue) {
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.trunc(numeric)));
 }
 
 function buildFinalWebhookUrl() {
@@ -176,6 +190,14 @@ function renderTunnel() {
   tunnelUrlEl.title = tunnelState.url ? "Click to copy tunnel URL" : "Tunnel inactive";
 
   renderFinalWebhookUrl();
+}
+
+function renderChaos() {
+  chaosEnabledEl.checked = Boolean(chaosState.enabled);
+  chaosRateEl.value = String(normalizeFailureRate(chaosState.failureRate));
+  chaosRateWrapEl.classList.toggle("is-visible", chaosState.enabled);
+  chaosPulseEl.classList.toggle("is-visible", chaosState.enabled);
+  chaosControlsEl.classList.toggle("is-active", chaosState.enabled);
 }
 
 function renderLogs() {
@@ -289,6 +311,7 @@ function render() {
   renderEndpointTabs();
   renderConfig();
   renderProfiles();
+  renderChaos();
   renderTunnel();
   renderLogs();
 }
@@ -320,6 +343,43 @@ async function fetchTunnelStatus() {
 
   tunnelState = await response.json();
   renderTunnel();
+}
+
+async function fetchChaosState() {
+  const response = await fetch("/api/chaos");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chaos config (${response.status})`);
+  }
+
+  const nextState = await response.json();
+  chaosState = {
+    enabled: Boolean(nextState.enabled),
+    failureRate: normalizeFailureRate(nextState.failureRate)
+  };
+  renderChaos();
+}
+
+async function updateChaosState(nextState) {
+  const payload = {
+    enabled: Boolean(nextState.enabled),
+    failureRate: normalizeFailureRate(nextState.failureRate)
+  };
+
+  const response = await fetch("/api/chaos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(`Chaos update failed (${response.status})`);
+  }
+
+  const saved = await response.json();
+  chaosState = {
+    enabled: Boolean(saved.enabled),
+    failureRate: normalizeFailureRate(saved.failureRate)
+  };
+  renderChaos();
 }
 
 async function copyText(value) {
@@ -520,6 +580,39 @@ profilesListEl.addEventListener("click", async (event) => {
   }
 });
 
+chaosEnabledEl.addEventListener("change", async () => {
+  const nextState = {
+    enabled: chaosEnabledEl.checked,
+    failureRate: normalizeFailureRate(chaosRateEl.value)
+  };
+
+  try {
+    await updateChaosState(nextState);
+    setSaveStatus(`Chaos ${chaosState.enabled ? "enabled" : "disabled"}.`, "success");
+  } catch (error) {
+    chaosEnabledEl.checked = chaosState.enabled;
+    const message = error instanceof Error ? error.message : "Chaos update failed";
+    setSaveStatus(message, "error");
+    renderChaos();
+  }
+});
+
+chaosRateEl.addEventListener("change", async () => {
+  const nextState = {
+    enabled: chaosEnabledEl.checked,
+    failureRate: normalizeFailureRate(chaosRateEl.value)
+  };
+
+  try {
+    await updateChaosState(nextState);
+    setSaveStatus(`Chaos rate set to ${chaosState.failureRate}%.`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Chaos update failed";
+    setSaveStatus(message, "error");
+    renderChaos();
+  }
+});
+
 clearLogsBtn.addEventListener("click", async () => {
   await fetch("/api/logs/clear", { method: "POST" });
   expandedLogIds.clear();
@@ -626,7 +719,7 @@ tunnelUrlEl.addEventListener("click", async () => {
 
 async function bootstrap() {
   try {
-    await Promise.all([fetchState(), fetchTunnelStatus()]);
+    await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
     setSaveStatus("", "info");
   } catch (_error) {
     setSaveStatus("Failed to load app state.", "error");
@@ -636,7 +729,7 @@ async function bootstrap() {
 bootstrap();
 setInterval(async () => {
   try {
-    await Promise.all([fetchState(), fetchTunnelStatus()]);
+    await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
   } catch (_error) {
     // Keep polling; transient network/tunnel issues should self-heal.
   }

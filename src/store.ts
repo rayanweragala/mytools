@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { AppState, EndpointConfig, EndpointKey, RequestLog, ProfileSnapshot } from "./types.js";
+import { AppState, ChaosConfig, EndpointConfig, EndpointKey, RequestLog, ProfileSnapshot } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,6 +9,7 @@ const DATA_PATH = path.resolve(__dirname, "../data/config.json");
 const MAX_LOGS = 1000;
 
 const defaultEndpointKeys: EndpointKey[] = ["incoming-call", "call-answer", "call-end"];
+const defaultChaosConfig: ChaosConfig = { enabled: false, failureRate: 0 };
 
 const defaultEndpointConfig: EndpointConfig = {
   authType: "NONE",
@@ -42,6 +43,7 @@ class Store {
         return {
           configs: loaded.configs || ({} as Record<EndpointKey, EndpointConfig>),
           profiles: Array.isArray(loaded.profiles) ? loaded.profiles : [],
+          chaos: loaded.chaos || defaultChaosConfig,
           logs: [], // Clear logs on load for now, or we can keep them
           maxLogs: MAX_LOGS,
           endpointKeys: loaded.endpointKeys || defaultEndpointKeys
@@ -53,6 +55,7 @@ class Store {
     return {
       configs: {} as Record<EndpointKey, EndpointConfig>,
       profiles: [],
+      chaos: defaultChaosConfig,
       logs: [],
       maxLogs: MAX_LOGS,
       endpointKeys: defaultEndpointKeys
@@ -79,6 +82,7 @@ class Store {
     const toSave = {
       configs: this.state.configs,
       profiles: this.state.profiles,
+      chaos: this.state.chaos,
       endpointKeys: this.state.endpointKeys
     };
     fs.writeFileSync(DATA_PATH, JSON.stringify(toSave, null, 2), "utf8");
@@ -152,6 +156,15 @@ class Store {
     this.statusIndices = {};
     this.saveState();
     return true;
+  }
+
+  getChaos(): ChaosConfig {
+    return this.state.chaos;
+  }
+
+  updateChaos(config: ChaosConfig): void {
+    this.state.chaos = config;
+    this.saveState();
   }
 
   addLog(log: Omit<RequestLog, "id">) {

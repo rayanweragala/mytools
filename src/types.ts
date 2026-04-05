@@ -20,6 +20,11 @@ export interface ProfileSnapshot {
   configs: Record<EndpointKey, EndpointConfig>;
 }
 
+export interface ChaosConfig {
+  enabled: boolean;
+  failureRate: number;
+}
+
 export interface RequestLog {
   id: number;
   endpoint: EndpointKey;
@@ -38,6 +43,7 @@ export interface RequestLog {
 export interface AppState {
   configs: Record<EndpointKey, EndpointConfig>;
   profiles: ProfileSnapshot[];
+  chaos: ChaosConfig;
   logs: RequestLog[];
   maxLogs: number;
   endpointKeys: EndpointKey[];

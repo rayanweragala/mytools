@@ -81,6 +81,115 @@ body {
   letter-spacing: 0.2px;
 }
 
+.chaos-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(88, 70, 116, 0.5);
+  border-radius: var(--radius-pill);
+  padding: 6px 10px;
+  background: rgba(36, 27, 62, 0.6);
+}
+
+.chaos-controls.is-active {
+  border-color: rgba(238, 109, 127, 0.6);
+}
+
+.chaos-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  font-weight: 700;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.chaos-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chaos-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(185, 175, 203, 0.42);
+  transition: background 150ms ease;
+}
+
+.chaos-slider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 150ms ease;
+}
+
+.chaos-toggle input:checked + .chaos-slider {
+  background: rgba(238, 109, 127, 0.78);
+}
+
+.chaos-toggle input:checked + .chaos-slider::after {
+  transform: translateX(16px);
+}
+
+.chaos-rate-wrap {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  color: var(--text-dim);
+}
+
+.chaos-rate-wrap.is-visible {
+  display: inline-flex;
+}
+
+.chaos-rate-wrap input {
+  width: 72px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  text-align: right;
+}
+
+.chaos-pulse {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ee6d7f;
+  box-shadow: 0 0 0 0 rgba(238, 109, 127, 0.45);
+}
+
+.chaos-pulse.is-visible {
+  display: inline-block;
+  animation: chaosPulse 1.2s infinite;
+}
+
+@keyframes chaosPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(238, 109, 127, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(238, 109, 127, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(238, 109, 127, 0);
+  }
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
@@ -728,6 +837,11 @@ textarea:focus {
   .topbar-right {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .chaos-controls {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .logs-toolbar {

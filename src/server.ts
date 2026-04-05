@@ -1,11 +1,44 @@
 import express, { Request, Response } from "express";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as ngrok from "ngrok";
 import { store } from "./store.js";
 import { EndpointConfig, EndpointKey } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ENV_PATH = path.resolve(__dirname, "../.env");
+
+function loadEnvFile(filePath: string): void {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const source = fs.readFileSync(filePath, "utf8");
+  source.split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      return;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      return;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] !== undefined) {
+      return;
+    }
+
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    const unquoted = rawValue.replace(/^(['"])(.*)\1$/, "$2");
+    process.env[key] = unquoted;
+  });
+}
+
+loadEnvFile(ENV_PATH);
 
 const PORT = Number(process.env.PORT || 8787);
 
@@ -20,6 +53,7 @@ const blockedReplayHeaders = new Set([
   "accept-encoding"
 ]);
 const pendingReplaySignatures = new Map<string, number>();
+let tunnelUrl: string | null = null;
 
 function delay(ms: number): Promise<void> {
   if (!ms || ms <= 0) {
@@ -248,6 +282,52 @@ app.post("/api/logs/:id/replay", async (req: Request, res: Response) => {
     unqueueReplaySignature(replaySignature);
     res.status(502).json({ error: "Replay request failed" });
   }
+});
+
+app.get("/api/tunnel/status", (_req, res) => {
+  res.json({
+    active: Boolean(tunnelUrl),
+    url: tunnelUrl
+  });
+});
+
+app.post("/api/tunnel/start", async (_req, res) => {
+  if (tunnelUrl) {
+    res.json({ active: true, url: tunnelUrl });
+    return;
+  }
+
+  try {
+    const rawToken = process.env.NGROK_AUTHTOKEN;
+    const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
+    tunnelUrl = await ngrok.connect({
+      addr: PORT,
+      ...(authtoken ? { authtoken } : {})
+    });
+
+    res.json({ active: true, url: tunnelUrl });
+  } catch (_error) {
+    tunnelUrl = null;
+    res.status(500).json({ active: false, url: null, error: "Failed to start tunnel" });
+  }
+});
+
+app.post("/api/tunnel/stop", async (_req, res) => {
+  try {
+    if (tunnelUrl) {
+      await ngrok.disconnect(tunnelUrl);
+    } else {
+      await ngrok.disconnect();
+    }
+    await ngrok.kill();
+  } catch (_error) {
+    tunnelUrl = null;
+    res.status(500).json({ active: false, url: null, error: "Failed to stop tunnel" });
+    return;
+  }
+
+  tunnelUrl = null;
+  res.json({ active: false, url: null });
 });
 
 app.post("/webhook/:endpoint", async (req: Request, res: Response) => {

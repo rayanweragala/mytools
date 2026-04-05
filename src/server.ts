@@ -54,6 +54,7 @@ const blockedReplayHeaders = new Set([
 ]);
 const pendingReplaySignatures = new Map<string, number>();
 let tunnelUrl: string | null = null;
+const tunnelPortPattern = new RegExp(`:${PORT}$`);
 
 function delay(ms: number): Promise<void> {
   if (!ms || ms <= 0) {
@@ -220,6 +221,66 @@ function buildReplayHeaders(headers: HeaderMap): Headers {
   return replayHeaders;
 }
 
+function isTunnelForPort(tunnel: ngrok.Ngrok.Tunnel): boolean {
+  const addr = String(tunnel.config?.addr || "").trim();
+  return addr === String(PORT) || tunnelPortPattern.test(addr);
+}
+
+function choosePreferredTunnel(tunnels: ngrok.Ngrok.Tunnel[]): ngrok.Ngrok.Tunnel | null {
+  if (tunnels.length === 0) {
+    return null;
+  }
+  const httpsTunnel = tunnels.find((tunnel) => tunnel.proto === "https");
+  return httpsTunnel || tunnels[0];
+}
+
+function extractExistingTunnelName(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const detailsErr = (error as { body?: { details?: { err?: unknown } } }).body?.details?.err;
+  if (typeof detailsErr !== "string") {
+    return null;
+  }
+
+  const match = detailsErr.match(/tunnel "([^"]+)" already exists/i);
+  return match ? match[1] : null;
+}
+
+async function listNgrokTunnels(): Promise<ngrok.Ngrok.Tunnel[]> {
+  const api = ngrok.getApi();
+  if (!api) {
+    return [];
+  }
+
+  try {
+    const response = await api.listTunnels();
+    return Array.isArray(response?.tunnels) ? response.tunnels : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function findExistingTunnelUrl(maybeError?: unknown): Promise<string | null> {
+  const tunnels = await listNgrokTunnels();
+  if (tunnels.length === 0) {
+    return null;
+  }
+
+  const existingName = extractExistingTunnelName(maybeError);
+  if (existingName) {
+    const namedTunnel = tunnels.find((tunnel) => tunnel.name === existingName);
+    if (namedTunnel?.public_url) {
+      return namedTunnel.public_url;
+    }
+  }
+
+  const matchingByPort = tunnels.filter(isTunnelForPort);
+  const tunnel = choosePreferredTunnel(matchingByPort);
+  return tunnel?.public_url || null;
+}
+
 const app = express();
 app.use("/api", express.json({ limit: "2mb", verify: captureRawBody }));
 app.use("/api", express.urlencoded({ extended: true, limit: "2mb", verify: captureRawBody }));
@@ -293,7 +354,14 @@ app.post("/api/logs/:id/replay", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/tunnel/status", (_req, res) => {
+app.get("/api/tunnel/status", async (_req, res) => {
+  const existingUrl = await findExistingTunnelUrl();
+  if (existingUrl) {
+    tunnelUrl = existingUrl;
+  } else if (!tunnelUrl) {
+    tunnelUrl = null;
+  }
+
   res.json({
     active: Boolean(tunnelUrl),
     url: tunnelUrl
@@ -302,6 +370,13 @@ app.get("/api/tunnel/status", (_req, res) => {
 
 app.post("/api/tunnel/start", async (_req, res) => {
   if (tunnelUrl) {
+    res.json({ active: true, url: tunnelUrl });
+    return;
+  }
+
+  const existingUrl = await findExistingTunnelUrl();
+  if (existingUrl) {
+    tunnelUrl = existingUrl;
     res.json({ active: true, url: tunnelUrl });
     return;
   }
@@ -316,7 +391,13 @@ app.post("/api/tunnel/start", async (_req, res) => {
 
     res.json({ active: true, url: tunnelUrl });
   } catch (error) {
-    console.error("Failed to start tunnel:", error);
+    const recoveredUrl = await findExistingTunnelUrl(error);
+    if (recoveredUrl) {
+      tunnelUrl = recoveredUrl;
+      res.json({ active: true, url: tunnelUrl });
+      return;
+    }
+
     tunnelUrl = null;
     res.status(500).json({ active: false, url: null, error: "Failed to start tunnel" });
   }

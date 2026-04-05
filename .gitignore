@@ -1,9 +1,16 @@
 node_modules/
 dist/
 .DS_Store
+
+# Local secrets / env files
 .env
+.env.*
+!.env.example
+
+# Runtime data
 data/
 !data/.gitkeep
-data/*.json
+
+# Local agent/runtime state
 .omx/
 .openclaude-profile.json

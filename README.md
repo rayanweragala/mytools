@@ -34,6 +34,10 @@ retry sequence (`503,503,200`), response delay, response headers JSON, and respo
 `GET /api/state`  
 `PUT /api/config/:endpoint`  
 `POST /api/config/reset`  
+`POST /api/profiles/save`  
+`GET /api/profiles`  
+`DELETE /api/profiles/:id`  
+`POST /api/profiles/:id/load`  
 `POST /api/logs/clear`  
 `POST /api/logs/:id/replay`  
 `GET /api/tunnel/status`  

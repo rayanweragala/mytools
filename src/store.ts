@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { AppState, EndpointConfig, EndpointKey, RequestLog, AuthType } from "./types.js";
+import { AppState, EndpointConfig, EndpointKey, RequestLog, ProfileSnapshot } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,8 +40,10 @@ class Store {
         const raw = fs.readFileSync(DATA_PATH, "utf8");
         const loaded = JSON.parse(raw);
         return {
-          ...loaded,
+          configs: loaded.configs || ({} as Record<EndpointKey, EndpointConfig>),
+          profiles: Array.isArray(loaded.profiles) ? loaded.profiles : [],
           logs: [], // Clear logs on load for now, or we can keep them
+          maxLogs: MAX_LOGS,
           endpointKeys: loaded.endpointKeys || defaultEndpointKeys
         };
       } catch (e) {
@@ -50,6 +52,7 @@ class Store {
     }
     return {
       configs: {} as Record<EndpointKey, EndpointConfig>,
+      profiles: [],
       logs: [],
       maxLogs: MAX_LOGS,
       endpointKeys: defaultEndpointKeys
@@ -75,6 +78,7 @@ class Store {
     // Only save configs and endpoint keys, not logs
     const toSave = {
       configs: this.state.configs,
+      profiles: this.state.profiles,
       endpointKeys: this.state.endpointKeys
     };
     fs.writeFileSync(DATA_PATH, JSON.stringify(toSave, null, 2), "utf8");
@@ -100,6 +104,54 @@ class Store {
     this.ensureDefaultConfigs();
     this.saveState();
     this.statusIndices = {};
+  }
+
+  getProfiles(): ProfileSnapshot[] {
+    return this.state.profiles;
+  }
+
+  saveProfile(name: string): ProfileSnapshot {
+    const baseId = Date.now().toString();
+    let profileId = baseId;
+    let suffix = 1;
+    while (this.state.profiles.some((profile) => profile.id === profileId)) {
+      profileId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    const profile: ProfileSnapshot = {
+      id: profileId,
+      name,
+      savedAt: new Date().toISOString(),
+      configs: JSON.parse(JSON.stringify(this.state.configs)) as Record<EndpointKey, EndpointConfig>
+    };
+
+    this.state.profiles.unshift(profile);
+    this.saveState();
+    return profile;
+  }
+
+  deleteProfile(profileId: string): boolean {
+    const before = this.state.profiles.length;
+    this.state.profiles = this.state.profiles.filter((profile) => profile.id !== profileId);
+    if (this.state.profiles.length === before) {
+      return false;
+    }
+    this.saveState();
+    return true;
+  }
+
+  loadProfile(profileId: string): boolean {
+    const profile = this.state.profiles.find((entry) => entry.id === profileId);
+    if (!profile) {
+      return false;
+    }
+
+    this.state.configs = JSON.parse(JSON.stringify(profile.configs)) as Record<EndpointKey, EndpointConfig>;
+    this.ensureDefaultConfigs();
+    this.statusIndices = {};
+    this.saveState();
+    return true;
   }
 
   addLog(log: Omit<RequestLog, "id">) {

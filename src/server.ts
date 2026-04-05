@@ -234,18 +234,63 @@ function choosePreferredTunnel(tunnels: ngrok.Ngrok.Tunnel[]): ngrok.Ngrok.Tunne
   return httpsTunnel || tunnels[0];
 }
 
-function extractExistingTunnelName(error: unknown): string | null {
+const existingTunnelPattern = /tunnel ["']?([^"']+)["']? already exists/i;
+
+function pushErrorText(target: string[], value: unknown): void {
+  if (typeof value === "string" && value.trim()) {
+    target.push(value.trim());
+  }
+}
+
+function collectNgrokErrorTexts(error: unknown): string[] {
+  const parts: string[] = [];
   if (!error || typeof error !== "object") {
-    return null;
+    pushErrorText(parts, error);
+    return parts;
   }
 
-  const detailsErr = (error as { body?: { details?: { err?: unknown } } }).body?.details?.err;
-  if (typeof detailsErr !== "string") {
-    return null;
+  const err = error as {
+    message?: unknown;
+    body?: {
+      msg?: unknown;
+      details?: unknown;
+    } | unknown;
+  };
+
+  pushErrorText(parts, err.message);
+  pushErrorText(parts, err.body);
+
+  if (err.body && typeof err.body === "object") {
+    const body = err.body as { msg?: unknown; details?: unknown };
+    pushErrorText(parts, body.msg);
+    pushErrorText(parts, body.details);
+
+    if (body.details && typeof body.details === "object") {
+      Object.values(body.details as Record<string, unknown>).forEach((detailValue) => {
+        pushErrorText(parts, detailValue);
+      });
+    }
   }
 
-  const match = detailsErr.match(/tunnel "([^"]+)" already exists/i);
-  return match ? match[1] : null;
+  return parts;
+}
+
+function uriMatchesTunnelName(uri: string | undefined, name: string): boolean {
+  if (!uri) {
+    return false;
+  }
+  return uri.endsWith(`/${name}`) || uri.endsWith(`/${encodeURIComponent(name)}`);
+}
+
+function extractExistingTunnelName(error: unknown): string | null {
+  const texts = collectNgrokErrorTexts(error);
+  for (const text of texts) {
+    const match = text.match(existingTunnelPattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 async function listNgrokTunnels(): Promise<ngrok.Ngrok.Tunnel[]> {
@@ -263,14 +308,26 @@ async function listNgrokTunnels(): Promise<ngrok.Ngrok.Tunnel[]> {
 }
 
 async function findExistingTunnelUrl(maybeError?: unknown): Promise<string | null> {
+  const api = ngrok.getApi();
+  const existingName = extractExistingTunnelName(maybeError);
+  if (api && existingName) {
+    try {
+      const detail = await api.tunnelDetail(existingName);
+      if (detail?.public_url) {
+        return detail.public_url;
+      }
+    } catch (_error) {
+      // Fall back to listing tunnels; tunnel detail is not always available.
+    }
+  }
+
   const tunnels = await listNgrokTunnels();
   if (tunnels.length === 0) {
     return null;
   }
 
-  const existingName = extractExistingTunnelName(maybeError);
   if (existingName) {
-    const namedTunnel = tunnels.find((tunnel) => tunnel.name === existingName);
+    const namedTunnel = tunnels.find((tunnel) => tunnel.name === existingName || uriMatchesTunnelName(tunnel.uri, existingName));
     if (namedTunnel?.public_url) {
       return namedTunnel.public_url;
     }
@@ -278,7 +335,33 @@ async function findExistingTunnelUrl(maybeError?: unknown): Promise<string | nul
 
   const matchingByPort = tunnels.filter(isTunnelForPort);
   const tunnel = choosePreferredTunnel(matchingByPort);
-  return tunnel?.public_url || null;
+  if (tunnel?.public_url) {
+    return tunnel.public_url;
+  }
+
+  if (existingName) {
+    const fallback = choosePreferredTunnel(tunnels);
+    return fallback?.public_url || null;
+  }
+
+  return null;
+}
+
+async function recoverExistingTunnelUrl(maybeError?: unknown): Promise<string | null> {
+  const existingName = extractExistingTunnelName(maybeError);
+  if (!existingName) {
+    return findExistingTunnelUrl();
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const recovered = await findExistingTunnelUrl(maybeError);
+    if (recovered) {
+      return recovered;
+    }
+    await delay(125 * (attempt + 1));
+  }
+
+  return null;
 }
 
 function extractNgrokErrorMessage(error: unknown): string {
@@ -311,20 +394,40 @@ async function tryStartTunnel(authtoken: string): Promise<string> {
 }
 
 async function clearConflictingTunnel(error: unknown): Promise<boolean> {
-  const existingName = extractExistingTunnelName(error);
-  if (!existingName) {
-    return false;
-  }
-
   const api = ngrok.getApi();
   if (!api) {
     return false;
   }
 
-  try {
-    await api.stopTunnel(existingName);
+  const tunnels = await listNgrokTunnels();
+  const namesToStop = new Set<string>();
+  const existingName = extractExistingTunnelName(error);
+  if (existingName) {
+    namesToStop.add(existingName);
+    tunnels
+      .filter((tunnel) => tunnel.name === existingName || uriMatchesTunnelName(tunnel.uri, existingName))
+      .forEach((tunnel) => namesToStop.add(tunnel.name));
+  }
+
+  tunnels.filter(isTunnelForPort).forEach((tunnel) => namesToStop.add(tunnel.name));
+
+  let stoppedAny = false;
+  for (const name of namesToStop) {
+    try {
+      const stopped = await api.stopTunnel(name);
+      stoppedAny = stopped || stoppedAny;
+    } catch (_stopError) {
+      // Try the next candidate.
+    }
+  }
+  if (stoppedAny) {
     return true;
-  } catch (_stopError) {
+  }
+
+  try {
+    await ngrok.disconnect();
+    return true;
+  } catch (_disconnectError) {
     return false;
   }
 }
@@ -358,6 +461,41 @@ app.put("/api/config/:endpoint", (req: Request, res: Response) => {
 
 app.post("/api/config/reset", (_req, res) => {
   store.resetConfigs();
+  res.json({ success: true });
+});
+
+app.post("/api/profiles/save", (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "Profile name is required" });
+    return;
+  }
+
+  const profile = store.saveProfile(name);
+  res.json({ success: true, profile });
+});
+
+app.get("/api/profiles", (_req, res) => {
+  res.json(store.getProfiles());
+});
+
+app.delete("/api/profiles/:id", (req: Request, res: Response) => {
+  const deleted = store.deleteProfile(req.params.id);
+  if (!deleted) {
+    res.status(404).json({ error: "Profile not found" });
+    return;
+  }
+
+  res.json({ success: true });
+});
+
+app.post("/api/profiles/:id/load", (req: Request, res: Response) => {
+  const loaded = store.loadProfile(req.params.id);
+  if (!loaded) {
+    res.status(404).json({ error: "Profile not found" });
+    return;
+  }
+
   res.json({ success: true });
 });
 
@@ -440,7 +578,7 @@ app.post("/api/tunnel/start", async (_req, res) => {
       return;
     } catch (error) {
       startError = error;
-      const recoveredUrl = await findExistingTunnelUrl(error);
+      const recoveredUrl = await recoverExistingTunnelUrl(error);
       if (recoveredUrl) {
         tunnelUrl = recoveredUrl;
         res.json({ active: true, url: tunnelUrl });
@@ -454,27 +592,42 @@ app.post("/api/tunnel/start", async (_req, res) => {
     }
   }
 
-  try {
-    await ngrok.kill();
-    tunnelUrl = await tryStartTunnel(authtoken);
-    res.json({ active: true, url: tunnelUrl });
-    return;
-  } catch (restartError) {
-    const recoveredAfterRestart = await findExistingTunnelUrl(restartError);
-    if (recoveredAfterRestart) {
-      tunnelUrl = recoveredAfterRestart;
-      res.json({ active: true, url: tunnelUrl });
-      return;
+  let finalError: unknown = startError;
+  for (let restartAttempt = 0; restartAttempt < 3; restartAttempt += 1) {
+    try {
+      await ngrok.disconnect();
+    } catch (_disconnectError) {
+      // Continue to kill/start; disconnect can fail if no tunnel exists.
     }
 
-    tunnelUrl = null;
-    res.status(500).json({
-      active: false,
-      url: null,
-      error: "Failed to start tunnel",
-      details: extractNgrokErrorMessage(restartError ?? startError)
-    });
+    try {
+      await ngrok.kill();
+      await delay(200 * (restartAttempt + 1));
+      tunnelUrl = await tryStartTunnel(authtoken);
+      res.json({ active: true, url: tunnelUrl });
+      return;
+    } catch (restartError) {
+      finalError = restartError;
+      const recoveredAfterRestart = await recoverExistingTunnelUrl(restartError);
+      if (recoveredAfterRestart) {
+        tunnelUrl = recoveredAfterRestart;
+        res.json({ active: true, url: tunnelUrl });
+        return;
+      }
+
+      if (!extractExistingTunnelName(restartError)) {
+        break;
+      }
+    }
   }
+
+  tunnelUrl = null;
+  res.status(500).json({
+    active: false,
+    url: null,
+    error: "Failed to start tunnel",
+    details: extractNgrokErrorMessage(finalError ?? startError)
+  });
 });
 
 app.post("/api/tunnel/stop", async (_req, res) => {

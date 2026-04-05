@@ -8,6 +8,9 @@ const finalWebhookUrlEl = document.getElementById("finalWebhookUrl");
 const saveStatusEl = document.getElementById("saveStatus");
 const logSearchEl = document.getElementById("logSearch");
 const saveBtn = document.getElementById("saveBtn");
+const profileNameInput = document.getElementById("profileNameInput");
+const saveProfileBtn = document.getElementById("saveProfileBtn");
+const profilesListEl = document.getElementById("profilesList");
 const tunnelToggleBtn = document.getElementById("tunnelToggleBtn");
 const tunnelUrlEl = document.getElementById("tunnelUrl");
 const tunnelCopyTooltipEl = document.getElementById("tunnelCopyTooltip");
@@ -255,10 +258,37 @@ function renderLogs() {
   logs.forEach((log) => seenLogIds.add(log.id));
 }
 
+function renderProfiles() {
+  if (!appState) return;
+
+  const profiles = appState.profiles || [];
+  if (profiles.length === 0) {
+    profilesListEl.innerHTML = '<p class="profiles-empty">No saved profiles yet.</p>';
+    return;
+  }
+
+  profilesListEl.innerHTML = profiles
+    .map((profile) => {
+      return `
+        <article class="profile-item" data-profile-id="${escapeHtml(profile.id)}">
+          <div class="profile-main">
+            <p class="profile-name">${escapeHtml(profile.name)}</p>
+            <p class="profile-time">${escapeHtml(formatTimestamp(profile.savedAt))}</p>
+          </div>
+          <div class="profile-actions">
+            <button type="button" class="btn btn-glass profile-btn" data-action="load" data-profile-id="${escapeHtml(profile.id)}">Load</button>
+            <button type="button" class="btn btn-glass profile-btn delete" data-action="delete" data-profile-id="${escapeHtml(profile.id)}">Delete</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+}
+
 function render() {
   if (!appState) return;
   renderEndpointTabs();
   renderConfig();
+  renderProfiles();
   renderTunnel();
   renderLogs();
 }
@@ -406,6 +436,88 @@ resetBtn.addEventListener("click", async () => {
   dirtyEndpoints.clear();
   await fetchState();
   setSaveStatus("All configs reset.", "success");
+});
+
+saveProfileBtn.addEventListener("click", async () => {
+  const name = profileNameInput.value.trim();
+  if (!name) {
+    setSaveStatus("Profile name is required.", "error");
+    return;
+  }
+
+  setSaveStatus(`Saving profile "${name}"...`, "info");
+  try {
+    const response = await fetch("/api/profiles/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    if (!response.ok) {
+      throw new Error(`Profile save failed (${response.status})`);
+    }
+
+    profileNameInput.value = "";
+    await fetchState();
+    setSaveStatus(`Saved profile "${name}".`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Profile save failed";
+    setSaveStatus(message, "error");
+  }
+});
+
+profilesListEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const button = target.closest("button[data-action]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const profileId = button.dataset.profileId;
+  const action = button.dataset.action;
+  if (!profileId || !action) {
+    return;
+  }
+
+  if (action === "delete") {
+    if (!confirm("Delete this profile?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/profiles/${profileId}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error(`Profile delete failed (${response.status})`);
+      }
+
+      await fetchState();
+      setSaveStatus("Profile deleted.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Profile delete failed";
+      setSaveStatus(message, "error");
+    }
+    return;
+  }
+
+  if (action === "load") {
+    try {
+      const response = await fetch(`/api/profiles/${profileId}/load`, { method: "POST" });
+      if (!response.ok) {
+        throw new Error(`Profile load failed (${response.status})`);
+      }
+
+      dirtyEndpoints.clear();
+      await fetchState();
+      renderConfig(true);
+      setSaveStatus("Profile loaded.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Profile load failed";
+      setSaveStatus(message, "error");
+    }
+  }
 });
 
 clearLogsBtn.addEventListener("click", async () => {

@@ -13,6 +13,13 @@ export interface EndpointConfig {
   responseHeaders: Record<string, string>;
 }
 
+export interface ProfileSnapshot {
+  id: string;
+  name: string;
+  savedAt: string;
+  configs: Record<EndpointKey, EndpointConfig>;
+}
+
 export interface RequestLog {
   id: number;
   endpoint: EndpointKey;
@@ -30,6 +37,7 @@ export interface RequestLog {
 
 export interface AppState {
   configs: Record<EndpointKey, EndpointConfig>;
+  profiles: ProfileSnapshot[];
   logs: RequestLog[];
   maxLogs: number;
   endpointKeys: EndpointKey[];

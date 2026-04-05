@@ -2,9 +2,23 @@ import express, { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import rateLimit from "express-rate-limit";
 import * as ngrok from "ngrok";
+import { analyzeTraffic, generatePayload, isAiConfigured } from "./aiGemini.js";
+import { executeBuilderSend, payloadFromSaved } from "./builderHttp.js";
+import { collectionsStore } from "./collectionsStore.js";
+import { environmentsStore } from "./environmentsStore.js";
+import { logError, logStartup } from "./log.js";
 import { store } from "./store.js";
-import { EndpointConfig, EndpointKey } from "./types.js";
+import type {
+  BodyFormat,
+  BuilderAuthPayload,
+  BuilderSendPayload,
+  EndpointConfig,
+  EndpointKey,
+  KeyValueEnabled,
+  SavedRequest
+} from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +55,62 @@ function loadEnvFile(filePath: string): void {
 loadEnvFile(ENV_PATH);
 
 const PORT = Number(process.env.PORT || 8787);
+
+const builderSendLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: "rate limit", retryAfter: 60 });
+  }
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: "rate limit", retryAfter: 60 });
+  }
+});
+
+interface BuilderHistoryEntry {
+  id: string;
+  at: string;
+  method: string;
+  url: string;
+  headers: KeyValueEnabled[];
+  bodyFormat: BodyFormat;
+  bodyText: string;
+  formFields: KeyValueEnabled[];
+  params: KeyValueEnabled[];
+  auth: BuilderAuthPayload;
+  status: number;
+  durationMs: number;
+}
+
+const builderHistory: BuilderHistoryEntry[] = [];
+const MAX_BUILDER_HISTORY = 200;
+
+function pushBuilderHistory(entry: Omit<BuilderHistoryEntry, "id" | "at">): BuilderHistoryEntry {
+  const full: BuilderHistoryEntry = {
+    ...entry,
+    id: `h_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
+    at: new Date().toISOString()
+  };
+  builderHistory.unshift(full);
+  if (builderHistory.length > MAX_BUILDER_HISTORY) {
+    builderHistory.length = MAX_BUILDER_HISTORY;
+  }
+  return full;
+}
+
+function ngrokConfigured(): boolean {
+  const raw = process.env.NGROK_AUTHTOKEN;
+  return typeof raw === "string" && raw.trim().length > 0;
+}
 
 type RequestWithRawBody = Request & { rawBody?: string };
 type HeaderMap = Record<string, string | string[] | undefined>;
@@ -219,6 +289,30 @@ function buildReplayHeaders(headers: HeaderMap): Headers {
     replayHeaders.append(key, String(value));
   });
   return replayHeaders;
+}
+
+function normalizeForwardUrl(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function forwardWebhookRequest(
+  logId: number,
+  forwardUrl: string,
+  method: string,
+  headers: HeaderMap,
+  rawBody: string
+): Promise<void> {
+  try {
+    const response = await fetch(forwardUrl, {
+      method,
+      headers: buildReplayHeaders(headers),
+      body: canIncludeBody(method) ? rawBody : undefined
+    });
+    store.updateLogForwardResult(logId, response.status, null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "forward request failed";
+    store.updateLogForwardResult(logId, null, message);
+  }
 }
 
 function isTunnelForPort(tunnel: ngrok.Ngrok.Tunnel): boolean {
@@ -445,6 +539,303 @@ app.get("/health", (_req, res) => {
 
 app.get("/api/state", (_req, res) => {
   res.json(store.getState());
+});
+
+app.get("/api/config/features", (_req, res) => {
+  res.json({
+    aiEnabled: isAiConfigured(),
+    ngrokEnabled: ngrokConfigured()
+  });
+});
+
+app.get("/api/builder/history", (_req, res) => {
+  res.json({ history: builderHistory });
+});
+
+app.post("/api/builder/history/clear", (_req, res) => {
+  builderHistory.length = 0;
+  res.json({ success: true });
+});
+
+app.post("/api/builder/send", builderSendLimiter, async (req: Request, res: Response) => {
+  const payload = req.body as BuilderSendPayload;
+  if (!payload || typeof payload.url !== "string" || !payload.url.trim()) {
+    res.status(400).json({ error: "url is required" });
+    return;
+  }
+
+  try {
+    const envMap = environmentsStore.getActiveSubstitutionMap();
+    const result = await executeBuilderSend(payload, envMap);
+    const authPayload: BuilderAuthPayload = payload.auth?.type ? payload.auth : { type: "NONE" };
+    pushBuilderHistory({
+      method: String(payload.method || "GET"),
+      url: String(payload.url),
+      headers: Array.isArray(payload.headers) ? payload.headers : [],
+      bodyFormat: (payload.bodyFormat as BodyFormat) || "json",
+      bodyText: typeof payload.body === "string" ? payload.body : "",
+      formFields: Array.isArray(payload.formFields) ? payload.formFields : [],
+      params: Array.isArray(payload.params) ? payload.params : [],
+      auth: authPayload,
+      status: result.status,
+      durationMs: result.duration_ms
+    });
+    res.json({
+      status: result.status,
+      statusText: result.statusText,
+      headers: result.headers,
+      body: result.body,
+      duration_ms: result.duration_ms,
+      size_bytes: result.size_bytes,
+      warnings: result.warnings
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "request failed";
+    logError("builder send failed", error);
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/collections", (_req, res) => {
+  res.json({ collections: collectionsStore.getAll() });
+});
+
+app.post("/api/collections", (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  const created = collectionsStore.create(name);
+  res.json(created);
+});
+
+app.delete("/api/collections/:id", (req: Request, res: Response) => {
+  const ok = collectionsStore.delete(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: "collection not found" });
+    return;
+  }
+  res.json({ success: true });
+});
+
+app.post("/api/collections/import", (req: Request, res: Response) => {
+  const body = req.body as { name?: string; requests?: unknown };
+  const name = typeof body?.name === "string" ? body.name.trim() : "Imported";
+  const requests = Array.isArray(body?.requests) ? body.requests : [];
+  const created = collectionsStore.importCollection({ name, requests: requests as Omit<SavedRequest, "id">[] });
+  res.json(created);
+});
+
+app.post("/api/collections/:id/requests", (req: Request, res: Response) => {
+  const collectionId = req.params.id;
+  const b = req.body as Partial<SavedRequest>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const saved = collectionsStore.addRequest(collectionId, {
+    name,
+    method: typeof b.method === "string" ? b.method : "GET",
+    url: typeof b.url === "string" ? b.url : "",
+    headers: Array.isArray(b.headers) ? b.headers : [],
+    bodyFormat: b.bodyFormat === "text" || b.bodyFormat === "form" ? b.bodyFormat : "json",
+    bodyText: typeof b.bodyText === "string" ? b.bodyText : "",
+    formFields: Array.isArray(b.formFields) ? b.formFields : [],
+    params: Array.isArray(b.params) ? b.params : [],
+    auth: b.auth?.type ? b.auth : { type: "NONE" }
+  });
+
+  if (!saved) {
+    res.status(404).json({ error: "collection not found" });
+    return;
+  }
+
+  res.json(saved);
+});
+
+app.put("/api/collections/:id/requests/:reqId", (req: Request, res: Response) => {
+  const b = req.body as Partial<SavedRequest>;
+  const updated = collectionsStore.updateRequest(req.params.id, req.params.reqId, {
+    ...(typeof b.name === "string" ? { name: b.name } : {}),
+    ...(typeof b.method === "string" ? { method: b.method } : {}),
+    ...(typeof b.url === "string" ? { url: b.url } : {}),
+    ...(Array.isArray(b.headers) ? { headers: b.headers } : {}),
+    ...(b.bodyFormat === "json" || b.bodyFormat === "text" || b.bodyFormat === "form" ? { bodyFormat: b.bodyFormat } : {}),
+    ...(typeof b.bodyText === "string" ? { bodyText: b.bodyText } : {}),
+    ...(Array.isArray(b.formFields) ? { formFields: b.formFields } : {}),
+    ...(Array.isArray(b.params) ? { params: b.params } : {}),
+    ...(b.auth?.type ? { auth: b.auth } : {})
+  });
+
+  if (!updated) {
+    res.status(404).json({ error: "collection or request not found" });
+    return;
+  }
+
+  res.json(updated);
+});
+
+app.delete("/api/collections/:id/requests/:reqId", (req: Request, res: Response) => {
+  const ok = collectionsStore.deleteRequest(req.params.id, req.params.reqId);
+  if (!ok) {
+    res.status(404).json({ error: "collection or request not found" });
+    return;
+  }
+  res.json({ success: true });
+});
+
+app.post("/api/collections/:id/requests/:reqId/run", builderSendLimiter, async (req: Request, res: Response) => {
+  const col = collectionsStore.getById(req.params.id);
+  if (!col) {
+    res.status(404).json({ error: "collection not found" });
+    return;
+  }
+
+  const saved = col.requests.find((r) => r.id === req.params.reqId);
+  if (!saved) {
+    res.status(404).json({ error: "request not found" });
+    return;
+  }
+
+  const payload = payloadFromSaved(saved);
+
+  try {
+    const envMap = environmentsStore.getActiveSubstitutionMap();
+    const result = await executeBuilderSend(payload, envMap);
+    res.json({
+      status: result.status,
+      statusText: result.statusText,
+      headers: result.headers,
+      body: result.body,
+      duration_ms: result.duration_ms,
+      size_bytes: result.size_bytes,
+      warnings: result.warnings
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "request failed";
+    logError("collection run failed", error);
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/environments", (_req, res) => {
+  res.json(environmentsStore.listForApi());
+});
+
+app.get("/api/environments/:id", (req: Request, res: Response) => {
+  const env = environmentsStore.getByIdForApi(req.params.id);
+  if (!env) {
+    res.status(404).json({ error: "environment not found" });
+    return;
+  }
+  res.json(env);
+});
+
+app.post("/api/environments", (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  const created = environmentsStore.create(name);
+  res.json(created);
+});
+
+app.delete("/api/environments/:id", (req: Request, res: Response) => {
+  const ok = environmentsStore.delete(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: "environment not found" });
+    return;
+  }
+  res.json({ success: true });
+});
+
+app.put("/api/environments/:id/variables", (req: Request, res: Response) => {
+  const rows = (req.body as { variables?: unknown }).variables;
+  if (!Array.isArray(rows)) {
+    res.status(400).json({ error: "variables array is required" });
+    return;
+  }
+
+  const normalized = rows.map((row: { key?: unknown; value?: unknown; secret?: unknown }) => ({
+    key: typeof row.key === "string" ? row.key : "",
+    value: typeof row.value === "string" ? row.value : "",
+    secret: Boolean(row.secret)
+  }));
+
+  const updated = environmentsStore.replaceVariables(req.params.id, normalized);
+  if (!updated) {
+    res.status(404).json({ error: "environment not found" });
+    return;
+  }
+
+  res.json(environmentsStore.getByIdForApi(updated.id));
+});
+
+app.post("/api/environments/active", (req: Request, res: Response) => {
+  const id = (req.body as { id?: string | null }).id;
+  if (id !== null && id !== undefined && typeof id !== "string") {
+    res.status(400).json({ error: "invalid id" });
+    return;
+  }
+  const nextId = id === undefined ? null : id;
+  environmentsStore.setActive(nextId);
+  res.json({ success: true, activeEnvironmentId: environmentsStore.listForApi().activeEnvironmentId });
+});
+
+app.post("/api/ai/generate", aiLimiter, async (req: Request, res: Response) => {
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+  const context = typeof req.body?.context === "string" ? req.body.context : undefined;
+  if (!prompt.trim()) {
+    res.status(400).json({ error: "prompt is required" });
+    return;
+  }
+
+  const out = await generatePayload(prompt, context);
+  if (out.error) {
+    res.json({ result: "", error: out.error });
+    return;
+  }
+  res.json({ result: out.result });
+});
+
+app.post("/api/ai/analyze-log", aiLimiter, async (req: Request, res: Response) => {
+  const logId = Number((req.body as { logId?: unknown }).logId);
+  if (!Number.isInteger(logId) || logId <= 0) {
+    res.status(400).json({ error: "invalid logId" });
+    return;
+  }
+
+  const entry = store.getLogById(logId);
+  if (!entry) {
+    res.status(404).json({ error: "log not found" });
+    return;
+  }
+
+  const requestSummary = [
+    `method: ${entry.method}`,
+    `path: ${entry.path}`,
+    `endpoint: ${entry.endpoint}`,
+    `authValid: ${entry.authValid}`,
+    `headers: ${JSON.stringify(entry.headers)}`,
+    `body: ${typeof entry.rawBody === "string" ? entry.rawBody : JSON.stringify(entry.body)}`
+  ].join("\n");
+
+  const responseSummary = [
+    `status: ${entry.returnedStatusCode}`,
+    `note: ${entry.note}`,
+    `durationMs: ${entry.durationMs ?? "n/a"}`
+  ].join("\n");
+
+  const out = await analyzeTraffic(requestSummary, responseSummary);
+  if (out.error) {
+    res.json({ result: "", error: out.error });
+    return;
+  }
+  res.json({ result: out.result });
 });
 
 app.put("/api/config/:endpoint", (req: Request, res: Response) => {
@@ -677,13 +1068,21 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     return;
   }
 
+  const t0 = Date.now();
   const { configs } = store.getState();
   const cfg = configs[endpoint];
   const rawBody = getRawRequestBody(request);
   const replayed = consumeReplaySignature(buildReplaySignature(req.method, req.originalUrl, req.headers, rawBody));
+  const forwardUrl = normalizeForwardUrl(cfg.forwardUrl);
+  const maybeForward = (logId: number): void => {
+    if (!forwardUrl) {
+      return;
+    }
+    void forwardWebhookRequest(logId, forwardUrl, req.method, req.headers, rawBody);
+  };
   const chaosConfig = store.getChaos();
   if (chaosConfig.enabled && Math.random() * 100 < chaosConfig.failureRate) {
-    store.addLog({
+    const logId = store.addLog({
       endpoint,
       timestamp: new Date().toISOString(),
       method: req.method,
@@ -693,9 +1092,13 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       rawBody,
       authValid: true,
       returnedStatusCode: 503,
+      forwardStatus: null,
+      forwardError: null,
       note: "chaos injection",
-      replayed
+      replayed,
+      durationMs: Date.now() - t0
     });
+    maybeForward(logId);
 
     res.status(503).json({
       error: "chaos",
@@ -706,7 +1109,7 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
 
   const authValid = validateAuth(req, cfg);
   if (!authValid) {
-    store.addLog({
+    const logId = store.addLog({
       endpoint,
       timestamp: new Date().toISOString(),
       method: req.method,
@@ -716,9 +1119,13 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       rawBody,
       authValid: false,
       returnedStatusCode: 401,
+      forwardStatus: null,
+      forwardError: null,
       note: "Auth failed",
-      replayed
+      replayed,
+      durationMs: Date.now() - t0
     });
+    maybeForward(logId);
 
     res.status(401).json({ status: "unauthorized", endpoint });
     return;
@@ -734,7 +1141,7 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     responsePayload = { raw: cfg.responseBody };
   }
 
-  store.addLog({
+  const logId = store.addLog({
     endpoint,
     timestamp: new Date().toISOString(),
     method: req.method,
@@ -744,9 +1151,13 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     rawBody,
     authValid: true,
     returnedStatusCode: statusCode,
+    forwardStatus: null,
+    forwardError: null,
     note: cfg.statusCodes && cfg.statusCodes.length > 0 ? "Sequence status code used" : "Configured status code used",
-    replayed
+    replayed,
+    durationMs: Date.now() - t0
   });
+  maybeForward(logId);
 
   if (cfg.responseHeaders) {
     Object.entries(cfg.responseHeaders).forEach(([key, value]) => {
@@ -758,10 +1169,11 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Webhook Mock Lab started on http://localhost:${PORT}`);
-  console.log("Endpoints:");
+  logStartup(`Webhook Mock Lab started on http://localhost:${PORT}`);
+  void isAiConfigured();
+  logStartup("Endpoints:");
   const { endpointKeys } = store.getState();
   endpointKeys.forEach((key) => {
-    console.log(`  POST /webhook/${key}`);
+    logStartup(`  POST /webhook/${key}`);
   });
 });

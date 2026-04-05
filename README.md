@@ -49,7 +49,16 @@ retry sequence (`503,503,200`), response delay, response headers JSON, response 
 `GET /api/tunnel/status`  
 `POST /api/tunnel/start`  
 `POST /api/tunnel/stop`  
-`POST /webhook/:endpoint`
+`POST /webhook/:endpoint`  
+`GET /api/config/features`  
+`POST /api/builder/send`  
+`GET /api/builder/history`  
+`POST /api/builder/history/clear`  
+`GET /api/collections` · `POST /api/collections` · `DELETE /api/collections/:id` · `POST /api/collections/import`  
+`POST /api/collections/:id/requests` · `PUT /api/collections/:id/requests/:reqId` · `DELETE /api/collections/:id/requests/:reqId` · `POST /api/collections/:id/requests/:reqId/run`  
+`GET /api/environments` · `GET /api/environments/:id` · `POST /api/environments` · `DELETE /api/environments/:id`  
+`PUT /api/environments/:id/variables` · `POST /api/environments/active`  
+`POST /api/ai/generate` · `POST /api/ai/analyze-log`
 
 ## Real curl examples
 

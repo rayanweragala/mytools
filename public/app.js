@@ -19,6 +19,76 @@ const chaosPulseEl = document.getElementById("chaosPulse");
 const tunnelToggleBtn = document.getElementById("tunnelToggleBtn");
 const tunnelUrlEl = document.getElementById("tunnelUrl");
 const tunnelCopyTooltipEl = document.getElementById("tunnelCopyTooltip");
+const simAiGenerateBtn = document.getElementById("simAiGenerateBtn");
+
+const tabSimulatorBtn = document.getElementById("tabSimulator");
+const tabBuilderBtn = document.getElementById("tabBuilder");
+const simulatorView = document.getElementById("simulatorView");
+const builderView = document.getElementById("builderView");
+
+const envSelectEl = document.getElementById("envSelect");
+const envManageBtn = document.getElementById("envManageBtn");
+const builderMethodEl = document.getElementById("builderMethod");
+const builderUrlEl = document.getElementById("builderUrl");
+const builderUrlHighlightEl = document.getElementById("builderUrlHighlight");
+const builderSaveBtn = document.getElementById("builderSaveBtn");
+const builderSendBtn = document.getElementById("builderSendBtn");
+const headersRowsEl = document.getElementById("headersRows");
+const addHeaderRowBtn = document.getElementById("addHeaderRow");
+const paramsRowsEl = document.getElementById("paramsRows");
+const addParamRowBtn = document.getElementById("addParamRow");
+const bodyFormatSelectEl = document.getElementById("bodyFormatSelect");
+const bodyFormatJsonBtn = document.getElementById("bodyFormatJsonBtn");
+const bodyAiGenerateBtn = document.getElementById("bodyAiGenerateBtn");
+const bodyAiBarEl = document.getElementById("bodyAiBar");
+const bodyAiPromptEl = document.getElementById("bodyAiPrompt");
+const bodyAiSendBtn = document.getElementById("bodyAiSendBtn");
+const bodyAiSpinnerEl = document.getElementById("bodyAiSpinner");
+const bodyAiErrorEl = document.getElementById("bodyAiError");
+const builderBodyTextEl = document.getElementById("builderBodyText");
+const formFieldsMountEl = document.getElementById("formFieldsMount");
+const addFormRowBtn = document.getElementById("addFormRow");
+const builderAuthTypeEl = document.getElementById("builderAuthType");
+const authBearerGroupEl = document.getElementById("authBearerGroup");
+const authApiKeyGroupEl = document.getElementById("authApiKeyGroup");
+const authBasicGroupEl = document.getElementById("authBasicGroup");
+const authBearerTokenEl = document.getElementById("authBearerToken");
+const authApiKeyHeaderEl = document.getElementById("authApiKeyHeader");
+const authApiKeyValueEl = document.getElementById("authApiKeyValue");
+const authBasicUserEl = document.getElementById("authBasicUser");
+const authBasicPassEl = document.getElementById("authBasicPass");
+
+const builderResponsePanelEl = document.getElementById("builderResponsePanel");
+const respStatusBadgeEl = document.getElementById("respStatusBadge");
+const respMetaEl = document.getElementById("respMeta");
+const respCopyBtn = document.getElementById("respCopyBtn");
+const respBodyOutEl = document.getElementById("respBodyOut");
+const respHeadersOutEl = document.getElementById("respHeadersOut");
+const respRawOutEl = document.getElementById("respRawOut");
+const respWarningsEl = document.getElementById("respWarnings");
+const respPanelBodyEl = document.getElementById("respPanelBody");
+const respPanelHeadersEl = document.getElementById("respPanelHeaders");
+const respPanelRawEl = document.getElementById("respPanelRaw");
+
+const collectionsMountEl = document.getElementById("collectionsMount");
+const newCollectionBtn = document.getElementById("newCollectionBtn");
+const importCollectionBtn = document.getElementById("importCollectionBtn");
+const importCollectionFileEl = document.getElementById("importCollectionFile");
+const builderHistoryMountEl = document.getElementById("builderHistoryMount");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+
+const modalBackdropEl = document.getElementById("modalBackdrop");
+const saveRequestModalEl = document.getElementById("saveRequestModal");
+const saveReqCollectionEl = document.getElementById("saveReqCollection");
+const saveReqNameEl = document.getElementById("saveReqName");
+const saveReqConfirmBtn = document.getElementById("saveReqConfirmBtn");
+
+const envModalEl = document.getElementById("envModal");
+const newEnvBtn = document.getElementById("newEnvBtn");
+const envListMountEl = document.getElementById("envListMount");
+const envVarRowsEl = document.getElementById("envVarRows");
+const addEnvVarRowBtn = document.getElementById("addEnvVarRow");
+const saveEnvVarsBtn = document.getElementById("saveEnvVarsBtn");
 
 const authGroups = {
   apiKeyHeaderGroup: document.getElementById("apiKeyHeaderGroup"),
@@ -38,6 +108,9 @@ const fields = {
   responseBody: document.getElementById("responseBody")
 };
 
+const MAIN_TAB_KEY = "webhooks_active_tab";
+const defaultRow = () => ({ key: "", value: "", enabled: true });
+
 let appState = null;
 let selectedEndpoint = "incoming-call";
 let tunnelState = { active: false, url: null };
@@ -45,10 +118,35 @@ let chaosState = { enabled: false, failureRate: 0 };
 let tunnelBusy = false;
 let tooltipTimer = null;
 
+let features = { aiEnabled: false, ngrokEnabled: false };
+
 const dirtyEndpoints = new Set();
 const expandedLogIds = new Set();
 const replayingLogIds = new Set();
 const seenLogIds = new Set();
+const analyzedLogIds = new Set();
+
+let collections = [];
+let builderHistory = [];
+let environmentsList = [];
+let activeEnvironmentId = null;
+
+let builderHeaders = [defaultRow()];
+let builderParams = [defaultRow()];
+let builderFormFields = [defaultRow()];
+let builderBodyFormat = "json";
+let suppressUrlSync = false;
+
+let lastBuilderResponse = null;
+let respActiveTab = "body";
+
+let expandedCollectionIds = new Set();
+let openCollectionMenuId = null;
+
+let selectedEnvEditId = null;
+let envVarDraft = [];
+
+let syncingParamsFromUrl = false;
 
 function setSaveStatus(message, type = "info") {
   saveStatusEl.textContent = message;
@@ -79,12 +177,32 @@ function statusClass(statusCode) {
   return "status-other";
 }
 
+function statusPillClass(statusCode) {
+  if (statusCode >= 500) return "is-5xx";
+  if (statusCode >= 400) return "is-4xx";
+  return "is-2xx";
+}
+
 function formatTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "Unknown time";
   }
   return date.toLocaleString();
+}
+
+function timeAgo(iso) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) {
+    return "";
+  }
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function normalizeStatusCodes(rawValue) {
@@ -239,7 +357,14 @@ function renderLogs() {
       const replaying = replayingLogIds.has(log.id);
       const isNew = !seenLogIds.has(log.id);
       const replayedBadge = log.replayed ? '<span class="replayed-badge">↺ replayed</span>' : "";
-
+      const durationText =
+        typeof log.durationMs === "number" ? `<div class="log-timing">Response time: ${log.durationMs} ms</div>` : "";
+      const analyzeBtn = features.aiEnabled
+        ? `<button type="button" class="btn btn-glass btn-micro" data-action="analyze" data-log-id="${log.id}" ${
+            analyzedLogIds.has(log.id) ? "disabled" : ""
+          }>${analyzedLogIds.has(log.id) ? "Analyzed" : "Analyze with AI"}</button>`
+        : "";
+      const analysisBoxId = `analysis-${log.id}`;
       return `
         <article class="log-card ${cssStatus} ${isNew ? "new-entry" : ""}" data-log-id="${log.id}">
           <button type="button" class="btn btn-glass replay-btn" data-action="replay" data-log-id="${log.id}" ${replaying ? "disabled" : ""}>${replaying ? "Replaying" : "Replay"}</button>
@@ -260,6 +385,7 @@ function renderLogs() {
           </div>
 
           <div class="log-details" ${expanded ? "" : "hidden"}>
+            ${durationText}
             <div class="log-block">
               <h3>Auth Result</h3>
               <pre>${log.authValid ? "ok" : "fail"}</pre>
@@ -271,6 +397,10 @@ function renderLogs() {
             <div class="log-block">
               <h3>Body</h3>
               <pre>${escapeHtml(prettyJson(log.body))}</pre>
+            </div>
+            <div class="log-block">
+              ${analyzeBtn}
+              <div id="${analysisBoxId}" class="ai-analyze-box is-hidden" hidden></div>
             </div>
           </div>
         </article>`;
@@ -359,6 +489,32 @@ async function fetchChaosState() {
   renderChaos();
 }
 
+async function fetchFeatures() {
+  try {
+    const res = await fetch("/api/config/features");
+    if (!res.ok) {
+      return;
+    }
+    features = await res.json();
+  } catch (_e) {
+    features = { aiEnabled: false, ngrokEnabled: false };
+  }
+  syncAiUi();
+}
+
+function syncAiUi() {
+  const disabled = !features.aiEnabled;
+  bodyAiGenerateBtn.disabled = disabled;
+  simAiGenerateBtn.disabled = disabled;
+  if (disabled) {
+    bodyAiGenerateBtn.title = "Set GEMINI_API_KEY in .env to enable AI generation";
+    simAiGenerateBtn.title = "Set GEMINI_API_KEY in .env to enable AI generation";
+  } else {
+    bodyAiGenerateBtn.removeAttribute("title");
+    simAiGenerateBtn.removeAttribute("title");
+  }
+}
+
 async function updateChaosState(nextState) {
   const payload = {
     enabled: Boolean(nextState.enabled),
@@ -408,6 +564,537 @@ function showCopyTooltip(text) {
   tooltipTimer = setTimeout(() => {
     tunnelCopyTooltipEl.textContent = "";
   }, 1200);
+}
+
+/* --- Main tabs --- */
+
+function getMainTab() {
+  return localStorage.getItem(MAIN_TAB_KEY) === "builder" ? "builder" : "simulator";
+}
+
+function setMainTab(tab) {
+  localStorage.setItem(MAIN_TAB_KEY, tab);
+  const isSim = tab === "simulator";
+  tabSimulatorBtn.classList.toggle("is-active", isSim);
+  tabBuilderBtn.classList.toggle("is-active", !isSim);
+  tabSimulatorBtn.setAttribute("aria-selected", isSim ? "true" : "false");
+  tabBuilderBtn.setAttribute("aria-selected", isSim ? "false" : "true");
+
+  simulatorView.classList.toggle("is-hidden", !isSim);
+  simulatorView.toggleAttribute("hidden", !isSim);
+  builderView.classList.toggle("is-hidden", isSim);
+  builderView.toggleAttribute("hidden", isSim);
+
+  if (!isSim) {
+    void refreshBuilderContext();
+  }
+}
+
+/* --- Builder: KV rows --- */
+
+function renderKvRows(container, rows, kind) {
+  container.innerHTML = rows
+    .map((row, idx) => {
+      const checked = row.enabled !== false ? "checked" : "";
+      return `
+        <div class="kv-row" data-kind="${escapeHtml(kind)}" data-idx="${idx}">
+          <input type="checkbox" data-field="enabled" ${checked} aria-label="Enable row" />
+          <input type="text" data-field="key" value="${escapeHtml(row.key)}" placeholder="key" />
+          <input type="text" data-field="value" value="${escapeHtml(row.value)}" placeholder="value" />
+          <button type="button" class="btn btn-glass btn-tiny" data-action="delete">✕</button>
+        </div>`;
+    })
+    .join("");
+
+  container.querySelectorAll(".kv-row").forEach((rowEl) => {
+    rowEl.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", () => onKvInput(rowEl, kind));
+      input.addEventListener("change", () => onKvInput(rowEl, kind));
+    });
+    const del = rowEl.querySelector("button[data-action='delete']");
+    del?.addEventListener("click", () => onKvDelete(rowEl, kind));
+  });
+}
+
+function onKvInput(rowEl, kind) {
+  const idx = Number(rowEl.dataset.idx);
+  const target = rowEl.querySelector("[data-field='key']");
+  const val = rowEl.querySelector("[data-field='value']");
+  const en = rowEl.querySelector("[data-field='enabled']");
+  const arr = getRowsByKind(kind);
+  if (!arr[idx]) {
+    return;
+  }
+  arr[idx].key = target instanceof HTMLInputElement ? target.value : "";
+  arr[idx].value = val instanceof HTMLInputElement ? val.value : "";
+  arr[idx].enabled = en instanceof HTMLInputElement ? en.checked : true;
+
+  if (kind === "params") {
+    syncUrlFromParams();
+  }
+  if (kind === "headers" || kind === "form" || kind === "params") {
+    updateUrlHighlight();
+  }
+}
+
+function onKvDelete(rowEl, kind) {
+  const idx = Number(rowEl.dataset.idx);
+  const arr = getRowsByKind(kind);
+  if (!arr || arr.length <= 1) {
+    arr[0] = defaultRow();
+    renderKvRows(kind === "headers" ? headersRowsEl : kind === "params" ? paramsRowsEl : formFieldsMountEl, arr, kind);
+    if (kind === "params") {
+      syncUrlFromParams();
+    }
+    return;
+  }
+  arr.splice(idx, 1);
+  renderKvRows(kind === "headers" ? headersRowsEl : kind === "params" ? paramsRowsEl : formFieldsMountEl, arr, kind);
+  if (kind === "params") {
+    syncUrlFromParams();
+  }
+}
+
+function getRowsByKind(kind) {
+  if (kind === "headers") return builderHeaders;
+  if (kind === "params") return builderParams;
+  if (kind === "form") return builderFormFields;
+  return builderHeaders;
+}
+
+function syncUrlFromParams() {
+  if (syncingParamsFromUrl) {
+    return;
+  }
+  const base = stripQuery(builderUrlEl.value || "");
+  const joined = mergeParamsIntoUrl(base, builderParams);
+  builderUrlEl.value = joined;
+  updateUrlHighlight();
+}
+
+function stripQuery(url) {
+  try {
+    const u = new URL(url);
+    u.search = "";
+    return u.toString();
+  } catch (_e) {
+    return url;
+  }
+}
+
+function mergeParamsIntoUrl(base, params) {
+  try {
+    const u = new URL(ensureUrlScheme(base));
+    const sp = new URLSearchParams();
+    params
+      .filter((r) => r.enabled !== false && String(r.key || "").trim())
+      .forEach((r) => sp.append(String(r.key).trim(), String(r.value ?? "")));
+    u.search = sp.toString();
+    return u.toString();
+  } catch (_e) {
+    return base;
+  }
+}
+
+function ensureUrlScheme(raw) {
+  const t = String(raw || "").trim();
+  if (!t) {
+    return "http://localhost";
+  }
+  if (!/^https?:\/\//i.test(t)) {
+    return `http://${t}`;
+  }
+  return t;
+}
+
+function parseParamsFromUrl(urlStr) {
+  try {
+    const u = new URL(ensureUrlScheme(urlStr));
+    const rows = [];
+    u.searchParams.forEach((value, key) => {
+      rows.push({ key, value, enabled: true });
+    });
+    if (rows.length === 0) {
+      return [defaultRow()];
+    }
+    return rows;
+  } catch (_e) {
+    return [defaultRow()];
+  }
+}
+
+function syncParamsFromUrlField() {
+  syncingParamsFromUrl = true;
+  builderParams = parseParamsFromUrl(builderUrlEl.value || "");
+  renderKvRows(paramsRowsEl, builderParams, "params");
+  syncingParamsFromUrl = false;
+  updateUrlHighlight();
+}
+
+function updateUrlHighlight() {
+  const url = builderUrlEl.value || "";
+  const active = Boolean(activeEnvironmentId);
+  if (!active || !url.includes("{{")) {
+    builderUrlHighlightEl.classList.add("is-hidden");
+    builderUrlHighlightEl.innerHTML = "";
+    return;
+  }
+  const html = url.replace(/\{\{([^}]+)\}\}/g, (_m, g1) => {
+    return `<span class="var-highlight">{{${escapeHtml(String(g1))}}}</span>`;
+  });
+  builderUrlHighlightEl.innerHTML = html;
+  builderUrlHighlightEl.classList.remove("is-hidden");
+}
+
+function setBuilderSubtab(name) {
+  document.querySelectorAll(".builder-subtab").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.subtab === name);
+  });
+  document.getElementById("subtabHeaders").classList.toggle("is-hidden", name !== "headers");
+  document.getElementById("subtabBody").classList.toggle("is-hidden", name !== "body");
+  document.getElementById("subtabAuth").classList.toggle("is-hidden", name !== "auth");
+  document.getElementById("subtabParams").classList.toggle("is-hidden", name !== "params");
+}
+
+function setBodyFormatUi() {
+  const fmt = builderBodyFormat;
+  const isForm = fmt === "form";
+  builderBodyTextEl.classList.toggle("is-hidden", isForm);
+  formFieldsMountEl.classList.toggle("is-hidden", !isForm);
+  addFormRowBtn.classList.toggle("is-hidden", !isForm);
+  bodyFormatJsonBtn.classList.toggle("is-hidden", fmt !== "json");
+}
+
+function syncBuilderAuthUi() {
+  const t = builderAuthTypeEl.value;
+  authBearerGroupEl.classList.toggle("is-hidden", t !== "BEARER");
+  authApiKeyGroupEl.classList.toggle("is-hidden", t !== "API_KEY");
+  authBasicGroupEl.classList.toggle("is-hidden", t !== "BASIC");
+}
+
+function buildAuthPayload() {
+  const type = builderAuthTypeEl.value;
+  if (type === "BEARER") {
+    return { type: "BEARER", bearerToken: authBearerTokenEl.value };
+  }
+  if (type === "API_KEY") {
+    return { type: "API_KEY", apiKeyHeader: authApiKeyHeaderEl.value, apiKeyValue: authApiKeyValueEl.value };
+  }
+  if (type === "BASIC") {
+    return { type: "BASIC", basicUser: authBasicUserEl.value, basicPassword: authBasicPassEl.value };
+  }
+  return { type: "NONE" };
+}
+
+function applyAuthToState(auth) {
+  const t = auth?.type || "NONE";
+  builderAuthTypeEl.value = t === "BEARER" || t === "API_KEY" || t === "BASIC" ? t : "NONE";
+  authBearerTokenEl.value = auth?.bearerToken || "";
+  authApiKeyHeaderEl.value = auth?.apiKeyHeader || "";
+  authApiKeyValueEl.value = auth?.apiKeyValue || "";
+  authBasicUserEl.value = auth?.basicUser || "";
+  authBasicPassEl.value = auth?.basicPassword || "";
+  syncBuilderAuthUi();
+}
+
+function collectBuilderPayload() {
+  return {
+    method: builderMethodEl.value,
+    url: builderUrlEl.value,
+    headers: builderHeaders,
+    body: builderBodyTextEl.value,
+    bodyFormat: builderBodyFormat,
+    formFields: builderFormFields,
+    params: builderParams,
+    auth: buildAuthPayload()
+  };
+}
+
+function applyBuilderSnapshot(snap) {
+  builderMethodEl.value = snap.method || "GET";
+  builderUrlEl.value = snap.url || "";
+  builderHeaders = Array.isArray(snap.headers) && snap.headers.length ? snap.headers : [defaultRow()];
+  builderParams = Array.isArray(snap.params) && snap.params.length ? snap.params : [defaultRow()];
+  builderFormFields = Array.isArray(snap.formFields) && snap.formFields.length ? snap.formFields : [defaultRow()];
+  builderBodyFormat = snap.bodyFormat === "text" || snap.bodyFormat === "form" ? snap.bodyFormat : "json";
+  bodyFormatSelectEl.value = builderBodyFormat;
+  builderBodyTextEl.value = typeof snap.bodyText === "string" ? snap.bodyText : "";
+  applyAuthToState(snap.auth || { type: "NONE" });
+  renderKvRows(headersRowsEl, builderHeaders, "headers");
+  renderKvRows(paramsRowsEl, builderParams, "params");
+  renderKvRows(formFieldsMountEl, builderFormFields, "form");
+  setBodyFormatUi();
+  updateUrlHighlight();
+}
+
+async function refreshBuilderContext() {
+  await fetchFeatures();
+  try {
+    const [cols, hist, envs] = await Promise.all([
+      fetch("/api/collections").then((r) => r.json()),
+      fetch("/api/builder/history").then((r) => r.json()),
+      fetch("/api/environments").then((r) => r.json())
+    ]);
+    collections = cols.collections || [];
+    builderHistory = hist.history || [];
+    environmentsList = envs.environments || [];
+    activeEnvironmentId = envs.activeEnvironmentId ?? null;
+    renderEnvSelect();
+    renderCollections();
+    renderBuilderHistory();
+  } catch (_e) {
+    setSaveStatus("Failed to load builder data.", "error");
+  }
+}
+
+function renderEnvSelect() {
+  envSelectEl.innerHTML = `<option value="">No environment</option>${environmentsList
+    .map((e) => `<option value="${escapeHtml(e.id)}" ${e.id === activeEnvironmentId ? "selected" : ""}>${escapeHtml(e.name)}</option>`)
+    .join("")}`;
+}
+
+async function setActiveEnvironment(id) {
+  await fetch("/api/environments/active", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: id || null })
+  });
+  const res = await fetch("/api/environments");
+  const data = await res.json();
+  environmentsList = data.environments || [];
+  activeEnvironmentId = data.activeEnvironmentId ?? null;
+  renderEnvSelect();
+  updateUrlHighlight();
+}
+
+function truncateUrl(u, n = 48) {
+  const s = String(u || "");
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+function renderCollections() {
+  if (collections.length === 0) {
+    collectionsMountEl.innerHTML = '<p class="profiles-empty">No collections yet.</p>';
+    return;
+  }
+
+  collectionsMountEl.innerHTML = collections
+    .map((col) => {
+      const expanded = expandedCollectionIds.has(col.id);
+      const reqs = (col.requests || [])
+        .map((r) => {
+          return `
+            <div class="collection-item" data-collection-id="${escapeHtml(col.id)}" data-request-id="${escapeHtml(r.id)}">
+              <div class="collection-item-main">
+                <span class="method-badge">${escapeHtml(r.method)}</span>
+                <span class="truncate" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+              </div>
+              <div class="collection-actions">
+                <button type="button" class="btn btn-glass btn-tiny" data-action="run-req">Run</button>
+                <button type="button" class="btn btn-glass btn-tiny" data-action="load-req">Load</button>
+                <button type="button" class="btn btn-glass btn-tiny" data-action="rename-req">Rename</button>
+                <button type="button" class="btn btn-glass btn-tiny" data-action="delete-req">Delete</button>
+              </div>
+            </div>`;
+        })
+        .join("");
+
+      return `
+        <div class="collection-block" data-collection-id="${escapeHtml(col.id)}">
+          <div class="collection-head">
+            <button type="button" class="collection-name-btn" data-action="toggle-col">${escapeHtml(col.name)}</button>
+            <div class="collection-actions">
+              <button type="button" class="btn btn-glass btn-tiny" data-action="export-col">Export</button>
+              <button type="button" class="btn btn-glass btn-tiny" data-action="delete-col">Delete</button>
+            </div>
+          </div>
+          <div class="collection-items" ${expanded ? "" : "hidden"}>
+            ${reqs || '<p class="profiles-empty">No saved requests.</p>'}
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderBuilderHistory() {
+  if (builderHistory.length === 0) {
+    builderHistoryMountEl.innerHTML = '<p class="profiles-empty">No history yet.</p>';
+    return;
+  }
+  builderHistoryMountEl.innerHTML = builderHistory
+    .map((h) => {
+      return `
+        <div class="history-item" data-history-id="${escapeHtml(h.id)}">
+          <div class="history-top">
+            <span class="method-badge">${escapeHtml(h.method)}</span>
+            <span class="status-badge ${statusClass(Number(h.status))}">${escapeHtml(h.status)}</span>
+          </div>
+          <div class="truncate" title="${escapeHtml(h.url)}">${escapeHtml(truncateUrl(h.url))}</div>
+          <div class="log-time">${escapeHtml(timeAgo(h.at))} · ${escapeHtml(String(h.durationMs))} ms</div>
+        </div>`;
+    })
+    .join("");
+}
+
+function openModal(kind) {
+  modalBackdropEl.hidden = false;
+  modalBackdropEl.classList.remove("is-hidden");
+  if (kind === "save") {
+    saveRequestModalEl.hidden = false;
+    saveRequestModalEl.classList.remove("is-hidden");
+    saveReqCollectionEl.innerHTML = collections.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("");
+  }
+  if (kind === "env") {
+    envModalEl.hidden = false;
+    envModalEl.classList.remove("is-hidden");
+    renderEnvModalList();
+  }
+}
+
+function closeModals() {
+  modalBackdropEl.hidden = true;
+  modalBackdropEl.classList.add("is-hidden");
+  saveRequestModalEl.hidden = true;
+  saveRequestModalEl.classList.add("is-hidden");
+  envModalEl.hidden = true;
+  envModalEl.classList.add("is-hidden");
+}
+
+function renderEnvModalList() {
+  if (environmentsList.length === 0) {
+    envListMountEl.innerHTML = '<p class="profiles-empty">No environments.</p>';
+    selectedEnvEditId = null;
+    envVarDraft = [{ key: "", value: "", secret: false }];
+    renderEnvVarRows();
+    return;
+  }
+  if (!selectedEnvEditId || !environmentsList.some((e) => e.id === selectedEnvEditId)) {
+    selectedEnvEditId = environmentsList[0].id;
+  }
+  envListMountEl.innerHTML = environmentsList
+    .map((e) => {
+      return `
+        <div class="env-item ${e.id === selectedEnvEditId ? "is-active" : ""}" data-env-id="${escapeHtml(e.id)}">
+          <button type="button" class="env-item-name" data-action="pick-env">${escapeHtml(e.name)}</button>
+          <button type="button" class="btn btn-glass btn-tiny" data-action="delete-env">✕</button>
+        </div>`;
+    })
+    .join("");
+  void loadEnvDetail(selectedEnvEditId);
+}
+
+async function loadEnvDetail(id) {
+  selectedEnvEditId = id;
+  const res = await fetch(`/api/environments/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    return;
+  }
+  const data = await res.json();
+  envVarDraft = (data.variables || []).map((v) => ({
+    key: v.key || "",
+    value: v.value || "",
+    secret: Boolean(v.secret)
+  }));
+  if (envVarDraft.length === 0) {
+    envVarDraft = [{ key: "", value: "", secret: false }];
+  }
+  renderEnvVarRows();
+}
+
+function renderEnvVarRows() {
+  envVarRowsEl.innerHTML = envVarDraft
+    .map((row, idx) => {
+      const sec = row.secret ? "checked" : "";
+      return `
+        <div class="kv-row env-var-row" data-idx="${idx}">
+          <input type="text" data-field="key" value="${escapeHtml(row.key)}" placeholder="KEY" />
+          <input type="text" data-field="value" value="${escapeHtml(row.value)}" placeholder="value" />
+          <label class="secret-toggle"><input type="checkbox" data-field="secret" ${sec} /> secret</label>
+          <button type="button" class="btn btn-glass btn-tiny" data-action="delete-env-var">✕</button>
+        </div>`;
+    })
+    .join("");
+
+  envVarRowsEl.querySelectorAll(".kv-row").forEach((rowEl) => {
+    rowEl.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", onEnvVarInput);
+      input.addEventListener("change", onEnvVarInput);
+    });
+    rowEl.querySelector("button[data-action='delete-env-var']")?.addEventListener("click", () => {
+      const idx = Number(rowEl.dataset.idx);
+      envVarDraft.splice(idx, 1);
+      if (envVarDraft.length === 0) {
+        envVarDraft.push({ key: "", value: "", secret: false });
+      }
+      renderEnvVarRows();
+    });
+  });
+}
+
+function onEnvVarInput(event) {
+  const rowEl = event.target.closest(".kv-row");
+  if (!(rowEl instanceof HTMLElement)) {
+    return;
+  }
+  const idx = Number(rowEl.dataset.idx);
+  const key = rowEl.querySelector("[data-field='key']");
+  const val = rowEl.querySelector("[data-field='value']");
+  const sec = rowEl.querySelector("[data-field='secret']");
+  envVarDraft[idx] = {
+    key: key instanceof HTMLInputElement ? key.value : "",
+    value: val instanceof HTMLInputElement ? val.value : "",
+    secret: sec instanceof HTMLInputElement ? sec.checked : false
+  };
+}
+
+function setRespSubtab(name) {
+  respActiveTab = name;
+  document.querySelectorAll(".resp-subtab").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.resptab === name);
+  });
+  respPanelBodyEl.classList.toggle("is-hidden", name !== "body");
+  respPanelHeadersEl.classList.toggle("is-hidden", name !== "headers");
+  respPanelRawEl.classList.toggle("is-hidden", name !== "raw");
+}
+
+function showBuilderResponse(result) {
+  lastBuilderResponse = result;
+  builderResponsePanelEl.classList.remove("is-hidden");
+  respStatusBadgeEl.textContent = String(result.status);
+  respStatusBadgeEl.className = `status-badge-pill ${statusPillClass(Number(result.status))}`;
+  respMetaEl.textContent = `${result.duration_ms} ms · ${result.size_bytes} bytes`;
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  if (warnings.length) {
+    respWarningsEl.textContent = warnings.map((w) => `⚠ ${w}`).join("\n");
+    respWarningsEl.classList.remove("is-hidden");
+  } else {
+    respWarningsEl.textContent = "";
+    respWarningsEl.classList.add("is-hidden");
+  }
+
+  let prettyBody = result.body || "";
+  try {
+    prettyBody = JSON.stringify(JSON.parse(prettyBody), null, 2);
+  } catch (_e) {
+    // keep text
+  }
+  respBodyOutEl.textContent = prettyBody;
+  respHeadersOutEl.textContent = prettyJson(result.headers || {});
+  respRawOutEl.textContent = result.body || "";
+  setRespSubtab("body");
+}
+
+async function runAiGenerate(prompt, context) {
+  const res = await fetch("/api/ai/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, context })
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error || "AI error");
+  }
+  return data.result;
 }
 
 endpointTabsEl.addEventListener("click", (event) => {
@@ -630,6 +1317,38 @@ logsEl.addEventListener("click", async (event) => {
     return;
   }
 
+  const analyzeBtn = target.closest("button[data-action='analyze']");
+  if (analyzeBtn instanceof HTMLButtonElement) {
+    event.stopPropagation();
+    const id = Number(analyzeBtn.dataset.logId);
+    if (!features.aiEnabled || !Number.isInteger(id) || analyzedLogIds.has(id)) {
+      return;
+    }
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = "Analyzing…";
+    try {
+      const res = await fetch("/api/ai/analyze-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logId: id })
+      });
+      const data = await res.json();
+      const box = document.getElementById(`analysis-${id}`);
+      if (box) {
+        box.classList.remove("is-hidden");
+        box.hidden = false;
+        box.textContent = data.error ? `Error: ${data.error}` : data.result || "";
+      }
+      analyzedLogIds.add(id);
+      analyzeBtn.textContent = "Analyzed";
+    } catch (_e) {
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = "Analyze with AI";
+      setSaveStatus("AI analysis failed.", "error");
+    }
+    return;
+  }
+
   const replayButton = target.closest("button[data-action='replay']");
   if (replayButton instanceof HTMLButtonElement) {
     event.stopPropagation();
@@ -717,13 +1436,503 @@ tunnelUrlEl.addEventListener("click", async () => {
   }
 });
 
+/* --- Main tab listeners --- */
+
+tabSimulatorBtn.addEventListener("click", () => setMainTab("simulator"));
+tabBuilderBtn.addEventListener("click", () => setMainTab("builder"));
+
+/* --- Builder listeners --- */
+
+document.querySelectorAll(".builder-subtab").forEach((btn) => {
+  btn.addEventListener("click", () => setBuilderSubtab(btn.dataset.subtab || "headers"));
+});
+
+builderUrlEl.addEventListener("input", () => {
+  syncParamsFromUrlField();
+});
+
+addHeaderRowBtn.addEventListener("click", () => {
+  builderHeaders.push(defaultRow());
+  renderKvRows(headersRowsEl, builderHeaders, "headers");
+});
+
+addParamRowBtn.addEventListener("click", () => {
+  builderParams.push(defaultRow());
+  renderKvRows(paramsRowsEl, builderParams, "params");
+  syncUrlFromParams();
+});
+
+addFormRowBtn.addEventListener("click", () => {
+  builderFormFields.push(defaultRow());
+  renderKvRows(formFieldsMountEl, builderFormFields, "form");
+});
+
+bodyFormatSelectEl.addEventListener("change", () => {
+  builderBodyFormat = bodyFormatSelectEl.value === "text" || bodyFormatSelectEl.value === "form" ? bodyFormatSelectEl.value : "json";
+  setBodyFormatUi();
+});
+
+bodyFormatJsonBtn.addEventListener("click", () => {
+  try {
+    const parsed = JSON.parse(builderBodyTextEl.value || "{}");
+    builderBodyTextEl.value = JSON.stringify(parsed, null, 2);
+  } catch (_e) {
+    setSaveStatus("Body is not valid JSON.", "error");
+  }
+});
+
+bodyAiGenerateBtn.addEventListener("click", () => {
+  if (!features.aiEnabled) {
+    return;
+  }
+  bodyAiBarEl.classList.toggle("is-hidden");
+  bodyAiErrorEl.classList.add("is-hidden");
+  bodyAiErrorEl.textContent = "";
+});
+
+bodyAiSendBtn.addEventListener("click", async () => {
+  if (!features.aiEnabled) {
+    return;
+  }
+  const prompt = bodyAiPromptEl.value.trim();
+  if (!prompt) {
+    return;
+  }
+  bodyAiSpinnerEl.classList.remove("is-hidden");
+  bodyAiPromptEl.disabled = true;
+  bodyAiSendBtn.disabled = true;
+  bodyAiErrorEl.classList.add("is-hidden");
+  try {
+    const ctx = `Method ${builderMethodEl.value}, URL ${builderUrlEl.value || "(empty)"}`;
+    const text = await runAiGenerate(prompt, ctx);
+    builderBodyTextEl.value = text;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Generation failed";
+    bodyAiErrorEl.textContent = msg;
+    bodyAiErrorEl.classList.remove("is-hidden");
+  } finally {
+    bodyAiSpinnerEl.classList.add("is-hidden");
+    bodyAiPromptEl.disabled = false;
+    bodyAiSendBtn.disabled = false;
+  }
+});
+
+builderAuthTypeEl.addEventListener("change", syncBuilderAuthUi);
+
+builderSendBtn.addEventListener("click", async () => {
+  builderSendBtn.disabled = true;
+  try {
+    const res = await fetch("/api/builder/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectBuilderPayload())
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `Send failed (${res.status})`);
+    }
+    showBuilderResponse(data);
+    await refreshBuilderContext();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Send failed";
+    setSaveStatus(msg, "error");
+  } finally {
+    builderSendBtn.disabled = false;
+  }
+});
+
+builderSaveBtn.addEventListener("click", () => {
+  if (!collections.length) {
+    setSaveStatus("Create a collection first.", "error");
+    return;
+  }
+  saveReqNameEl.value = "";
+  openModal("save");
+});
+
+saveReqConfirmBtn.addEventListener("click", async () => {
+  const collectionId = saveReqCollectionEl.value;
+  const name = saveReqNameEl.value.trim();
+  if (!collectionId || !name) {
+    setSaveStatus("Collection and name are required.", "error");
+    return;
+  }
+  const snap = collectBuilderPayload();
+  const res = await fetch(`/api/collections/${encodeURIComponent(collectionId)}/requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      method: snap.method,
+      url: snap.url,
+      headers: snap.headers,
+      bodyFormat: snap.bodyFormat,
+      bodyText: snap.body,
+      formFields: snap.formFields,
+      params: snap.params,
+      auth: snap.auth
+    })
+  });
+  if (!res.ok) {
+    setSaveStatus("Save failed.", "error");
+    return;
+  }
+  closeModals();
+  await refreshBuilderContext();
+  setSaveStatus("Request saved.", "success");
+});
+
+envSelectEl.addEventListener("change", async () => {
+  const v = envSelectEl.value;
+  await setActiveEnvironment(v || null);
+  updateUrlHighlight();
+});
+
+envManageBtn.addEventListener("click", () => openModal("env"));
+
+modalBackdropEl.addEventListener("click", closeModals);
+document.querySelectorAll("[data-close-modal]").forEach((btn) => {
+  btn.addEventListener("click", closeModals);
+});
+
+newCollectionBtn.addEventListener("click", async () => {
+  const name = prompt("Collection name");
+  if (!name || !name.trim()) {
+    return;
+  }
+  await fetch("/api/collections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim() })
+  });
+  await refreshBuilderContext();
+});
+
+importCollectionBtn.addEventListener("click", () => importCollectionFileEl.click());
+
+importCollectionFileEl.addEventListener("change", async () => {
+  const file = importCollectionFileEl.files?.[0];
+  importCollectionFileEl.value = "";
+  if (!file) {
+    return;
+  }
+  const text = await file.text();
+  try {
+    const data = JSON.parse(text);
+    await fetch("/api/collections/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    await refreshBuilderContext();
+    setSaveStatus("Collection imported.", "success");
+  } catch (_e) {
+    setSaveStatus("Import failed.", "error");
+  }
+});
+
+clearHistoryBtn.addEventListener("click", async () => {
+  await fetch("/api/builder/history/clear", { method: "POST" });
+  await refreshBuilderContext();
+});
+
+collectionsMountEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const headBtn = target.closest("button[data-action='toggle-col']");
+  if (headBtn) {
+    const block = headBtn.closest(".collection-block");
+    const id = block?.getAttribute("data-collection-id");
+    if (!id) {
+      return;
+    }
+    if (expandedCollectionIds.has(id)) {
+      expandedCollectionIds.delete(id);
+    } else {
+      expandedCollectionIds.add(id);
+    }
+    renderCollections();
+    return;
+  }
+
+  const exportBtn = target.closest("button[data-action='export-col']");
+  if (exportBtn) {
+    const block = exportBtn.closest(".collection-block");
+    const id = block?.getAttribute("data-collection-id");
+    const col = collections.find((c) => c.id === id);
+    if (!col) {
+      return;
+    }
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            name: col.name,
+            requests: (col.requests || []).map((r) => ({
+              name: r.name,
+              method: r.method,
+              url: r.url,
+              headers: r.headers,
+              bodyFormat: r.bodyFormat,
+              bodyText: r.bodyText,
+              formFields: r.formFields,
+              params: r.params,
+              auth: r.auth
+            }))
+          },
+          null,
+          2
+        )
+      ],
+      { type: "application/json" }
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "collection.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return;
+  }
+
+  const deleteCol = target.closest("button[data-action='delete-col']");
+  if (deleteCol) {
+    const block = deleteCol.closest(".collection-block");
+    const id = block?.getAttribute("data-collection-id");
+    if (!id || !confirm("Delete this collection?")) {
+      return;
+    }
+    await fetch(`/api/collections/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshBuilderContext();
+    return;
+  }
+
+  const runReq = target.closest("button[data-action='run-req']");
+  if (runReq) {
+    const row = runReq.closest(".collection-item");
+    const cid = row?.getAttribute("data-collection-id");
+    const rid = row?.getAttribute("data-request-id");
+    if (!cid || !rid) {
+      return;
+    }
+    const res = await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}/run`, {
+      method: "POST"
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setSaveStatus(data.error || "Run failed.", "error");
+      return;
+    }
+    showBuilderResponse(data);
+    return;
+  }
+
+  const loadReq = target.closest("button[data-action='load-req']");
+  if (loadReq) {
+    const row = loadReq.closest(".collection-item");
+    const cid = row?.getAttribute("data-collection-id");
+    const rid = row?.getAttribute("data-request-id");
+    const col = collections.find((c) => c.id === cid);
+    const req = col?.requests?.find((r) => r.id === rid);
+    if (!req) {
+      return;
+    }
+    applyBuilderSnapshot({
+      method: req.method,
+      url: req.url,
+      headers: req.headers,
+      params: req.params,
+      bodyFormat: req.bodyFormat,
+      bodyText: req.bodyText,
+      formFields: req.formFields,
+      auth: req.auth
+    });
+    return;
+  }
+
+  const renameReq = target.closest("button[data-action='rename-req']");
+  if (renameReq) {
+    const row = renameReq.closest(".collection-item");
+    const cid = row?.getAttribute("data-collection-id");
+    const rid = row?.getAttribute("data-request-id");
+    const col = collections.find((c) => c.id === cid);
+    const req = col?.requests?.find((r) => r.id === rid);
+    if (!req) {
+      return;
+    }
+    const name = prompt("Request name", req.name);
+    if (!name || !name.trim()) {
+      return;
+    }
+    await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() })
+    });
+    await refreshBuilderContext();
+    return;
+  }
+
+  const deleteReq = target.closest("button[data-action='delete-req']");
+  if (deleteReq) {
+    const row = deleteReq.closest(".collection-item");
+    const cid = row?.getAttribute("data-collection-id");
+    const rid = row?.getAttribute("data-request-id");
+    if (!cid || !rid || !confirm("Delete this saved request?")) {
+      return;
+    }
+    await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, { method: "DELETE" });
+    await refreshBuilderContext();
+  }
+});
+
+builderHistoryMountEl.addEventListener("click", (event) => {
+  const item = event.target instanceof HTMLElement ? event.target.closest(".history-item") : null;
+  if (!item) {
+    return;
+  }
+  const id = item.getAttribute("data-history-id");
+  const entry = builderHistory.find((h) => h.id === id);
+  if (!entry) {
+    return;
+  }
+  applyBuilderSnapshot({
+    method: entry.method,
+    url: entry.url,
+    headers: entry.headers,
+    params: entry.params,
+    bodyFormat: entry.bodyFormat,
+    bodyText: entry.bodyText,
+    formFields: entry.formFields,
+    auth: entry.auth
+  });
+});
+
+respCopyBtn.addEventListener("click", async () => {
+  if (!lastBuilderResponse) {
+    return;
+  }
+  let prettyBody = lastBuilderResponse.body || "";
+  try {
+    prettyBody = JSON.stringify(JSON.parse(prettyBody), null, 2);
+  } catch (_e) {
+    // keep
+  }
+  await copyText(prettyBody);
+  setSaveStatus("Response body copied.", "success");
+});
+
+document.querySelectorAll(".resp-subtab").forEach((btn) => {
+  btn.addEventListener("click", () => setRespSubtab(btn.dataset.resptab || "body"));
+});
+
+newEnvBtn.addEventListener("click", async () => {
+  const name = prompt("Environment name");
+  if (!name || !name.trim()) {
+    return;
+  }
+  await fetch("/api/environments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim() })
+  });
+  await refreshBuilderContext();
+  renderEnvModalList();
+});
+
+envListMountEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const pick = target.closest("button[data-action='pick-env']");
+  if (pick) {
+    const item = pick.closest(".env-item");
+    const id = item?.getAttribute("data-env-id");
+    if (!id) {
+      return;
+    }
+    selectedEnvEditId = id;
+    envListMountEl.querySelectorAll(".env-item").forEach((el) => {
+      el.classList.toggle("is-active", el.getAttribute("data-env-id") === id);
+    });
+    await loadEnvDetail(id);
+    return;
+  }
+  const del = target.closest("button[data-action='delete-env']");
+  if (del) {
+    const item = del.closest(".env-item");
+    const id = item?.getAttribute("data-env-id");
+    if (!id || !confirm("Delete this environment?")) {
+      return;
+    }
+    await fetch(`/api/environments/${encodeURIComponent(id)}`, { method: "DELETE" });
+    selectedEnvEditId = null;
+    await refreshBuilderContext();
+    renderEnvModalList();
+  }
+});
+
+addEnvVarRowBtn.addEventListener("click", () => {
+  envVarDraft.push({ key: "", value: "", secret: false });
+  renderEnvVarRows();
+});
+
+saveEnvVarsBtn.addEventListener("click", async () => {
+  if (!selectedEnvEditId) {
+    return;
+  }
+  const res = await fetch(`/api/environments/${encodeURIComponent(selectedEnvEditId)}/variables`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ variables: envVarDraft })
+  });
+  if (!res.ok) {
+    setSaveStatus("Failed to save variables.", "error");
+    return;
+  }
+  await refreshBuilderContext();
+  closeModals();
+  setSaveStatus("Environment variables saved.", "success");
+});
+
+simAiGenerateBtn.addEventListener("click", async () => {
+  if (!features.aiEnabled) {
+    return;
+  }
+  const ctx = `Endpoint: ${selectedEndpoint}, auth: ${fields.authType.value}`;
+  const prompt = "Generate a realistic JSON response body for this webhook simulator endpoint.";
+  simAiGenerateBtn.disabled = true;
+  try {
+    const text = await runAiGenerate(prompt, ctx);
+    fields.responseBody.value = text;
+    markCurrentEndpointDirty();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "AI error";
+    setSaveStatus(msg, "error");
+  } finally {
+    simAiGenerateBtn.disabled = false;
+    syncAiUi();
+  }
+});
+
 async function bootstrap() {
   try {
+    await fetchFeatures();
     await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
     setSaveStatus("", "info");
   } catch (_error) {
     setSaveStatus("Failed to load app state.", "error");
   }
+
+  setMainTab(getMainTab());
+  renderKvRows(headersRowsEl, builderHeaders, "headers");
+  renderKvRows(paramsRowsEl, builderParams, "params");
+  renderKvRows(formFieldsMountEl, builderFormFields, "form");
+  setBuilderSubtab("headers");
+  setBodyFormatUi();
+  syncBuilderAuthUi();
 }
 
 bootstrap();

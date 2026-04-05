@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { logError } from "./log.js";
 import { AppState, ChaosConfig, EndpointConfig, EndpointKey, RequestLog, ProfileSnapshot } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +23,8 @@ const defaultEndpointConfig: EndpointConfig = {
   responseBody: JSON.stringify({ status: "ok" }, null, 2),
   responseHeaders: {
     "Content-Type": "application/json"
-  }
+  },
+  forwardUrl: ""
 };
 
 class Store {
@@ -49,7 +51,7 @@ class Store {
           endpointKeys: loaded.endpointKeys || defaultEndpointKeys
         };
       } catch (e) {
-        console.error("Failed to load state from file, using defaults", e);
+        logError("Failed to load state from file, using defaults", e);
       }
     }
     return {
@@ -63,13 +65,20 @@ class Store {
   }
 
   private ensureDefaultConfigs() {
-    this.state.endpointKeys.forEach(key => {
+    this.state.endpointKeys.forEach((key) => {
+      const existing = this.state.configs[key];
       if (!this.state.configs[key]) {
         this.state.configs[key] = {
           ...defaultEndpointConfig,
           responseBody: JSON.stringify({ accepted: true, event: key }, null, 2)
         };
+        return;
       }
+
+      this.state.configs[key] = {
+        ...defaultEndpointConfig,
+        ...existing
+      };
     });
   }
 
@@ -167,15 +176,30 @@ class Store {
     this.saveState();
   }
 
-  addLog(log: Omit<RequestLog, "id">) {
-    this.state.logs.unshift({ id: this.logIdCounter++, ...log });
+  addLog(log: Omit<RequestLog, "id">): number {
+    const id = this.logIdCounter++;
+    this.state.logs.unshift({ id, ...log });
     if (this.state.logs.length > MAX_LOGS) {
       this.state.logs.length = MAX_LOGS;
     }
+    return id;
   }
 
   clearLogs() {
     this.state.logs = [];
+  }
+
+  getLogById(id: number): RequestLog | undefined {
+    return this.state.logs.find((entry) => entry.id === id);
+  }
+
+  updateLogForwardResult(logId: number, forwardStatus: number | null, forwardError: string | null): void {
+    const log = this.state.logs.find((entry) => entry.id === logId);
+    if (!log) {
+      return;
+    }
+    log.forwardStatus = forwardStatus;
+    log.forwardError = forwardError;
   }
 
   getNextStatusCode(endpoint: EndpointKey): number {

@@ -28,118 +28,353 @@
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel config-panel">
-        <div class="panel-header">
-          <div>
-            <h1 class="panel-title">Endpoint Config</h1>
-            <p class="panel-subtitle">Behavior per webhook route</p>
+    <nav class="main-tabs" aria-label="Primary">
+      <button type="button" id="tabSimulator" class="main-tab is-active" role="tab" aria-selected="true">Simulator</button>
+      <button type="button" id="tabBuilder" class="main-tab" role="tab" aria-selected="false">Builder</button>
+    </nav>
+
+    <div id="simulatorView" class="view-root">
+      <main class="layout">
+        <section class="panel config-panel">
+          <div class="panel-header">
+            <div>
+              <h1 class="panel-title">Endpoint Config</h1>
+              <p class="panel-subtitle">Behavior per webhook route</p>
+            </div>
+            <button id="resetBtn" class="btn btn-glass" type="button">Reset</button>
           </div>
-          <button id="resetBtn" class="btn btn-glass" type="button">Reset</button>
-        </div>
 
-        <div class="endpoint-tabs" id="endpointTabs" role="tablist" aria-label="Endpoints"></div>
+          <div class="endpoint-tabs" id="endpointTabs" role="tablist" aria-label="Endpoints"></div>
 
-        <div class="webhook-url-wrap">
-          <span class="label-micro">Active Webhook URL</span>
-          <code id="finalWebhookUrl" class="webhook-url"></code>
-        </div>
+          <div class="webhook-url-wrap">
+            <span class="label-micro">Active Webhook URL</span>
+            <code id="finalWebhookUrl" class="webhook-url"></code>
+          </div>
 
-        <form id="configForm" class="config-form">
-          <section class="form-section">
-            <h2>Auth</h2>
+          <form id="configForm" class="config-form">
+            <section class="form-section">
+              <h2>Auth</h2>
+              <div class="field-grid">
+                <label class="field">
+                  <span>Auth Type</span>
+                  <select id="authType" name="authType">
+                    <option value="NONE">NONE</option>
+                    <option value="API_KEY">API_KEY</option>
+                    <option value="BEARER">BEARER</option>
+                  </select>
+                </label>
+
+                <label class="field auth-group" id="apiKeyHeaderGroup">
+                  <span>API Key Header</span>
+                  <input id="apiKeyHeaderName" name="apiKeyHeaderName" type="text" />
+                </label>
+
+                <label class="field auth-group" id="apiKeyValueGroup">
+                  <span>API Key Value</span>
+                  <input id="apiKeyValue" name="apiKeyValue" type="text" />
+                </label>
+
+                <label class="field auth-group" id="bearerGroup">
+                  <span>Bearer Token</span>
+                  <input id="bearerToken" name="bearerToken" type="text" />
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h2>Response</h2>
+              <div class="field-grid three-col">
+                <label class="field">
+                  <span>Status Code</span>
+                  <input id="defaultStatusCode" name="defaultStatusCode" type="number" min="100" max="599" />
+                </label>
+
+                <label class="field">
+                  <span>Retry Sequence</span>
+                  <input id="statusCodes" name="statusCodes" type="text" placeholder="503, 503, 200" />
+                </label>
+
+                <label class="field">
+                  <span>Delay (ms)</span>
+                  <input id="responseDelayMs" name="responseDelayMs" type="number" min="0" />
+                </label>
+              </div>
+              <div class="field-grid">
+                <label class="field">
+                  <span>Forward URL</span>
+                  <input id="forwardUrl" name="forwardUrl" type="text" placeholder="https://your-backend.com/webhook/incoming-call" />
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h2>Body &amp; Headers</h2>
+              <div class="field-grid split">
+                <label class="field">
+                  <span>Response Headers (JSON)</span>
+                  <textarea id="responseHeaders" name="responseHeaders" rows="10"></textarea>
+                </label>
+
+                <label class="field response-body-field">
+                  <span class="response-body-label-row">
+                    <span>Response Body</span>
+                    <span class="response-body-actions">
+                      <button type="button" id="simAiGenerateBtn" class="btn btn-glass btn-micro" title="Generate with AI">✦ Generate</button>
+                    </span>
+                  </span>
+                  <textarea id="responseBody" name="responseBody" rows="10"></textarea>
+                </label>
+              </div>
+            </section>
+
+            <div class="save-row">
+              <p id="saveStatus" class="save-status" aria-live="polite"></p>
+              <button id="saveBtn" type="submit" class="btn btn-primary save-btn">Save Endpoint Config</button>
+            </div>
+          </form>
+
+          <section class="profiles-section">
+            <h2>Profiles</h2>
+            <div class="profiles-actions">
+              <input id="profileNameInput" type="text" placeholder="profile name" />
+              <button id="saveProfileBtn" type="button" class="btn btn-glass">Save Profile</button>
+            </div>
+            <div id="profilesList" class="profiles-list"></div>
+          </section>
+        </section>
+
+        <section class="panel logs-panel">
+          <div class="panel-header logs-header">
+            <div class="requests-title-wrap">
+              <h1 class="panel-title">Requests</h1>
+              <span id="logCount" class="count-pill">0</span>
+            </div>
+            <div class="logs-toolbar">
+              <input id="logSearch" type="search" placeholder="Search requests..." />
+              <button id="clearLogsBtn" class="btn btn-glass" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="logs" class="logs" aria-live="polite"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="builderView" class="view-root is-hidden" hidden>
+      <div class="builder-layout">
+        <aside class="builder-sidebar panel">
+          <div class="sidebar-section">
+            <div class="sidebar-head">
+              <h2 class="sidebar-title">Collections</h2>
+              <div class="sidebar-actions">
+                <button type="button" id="newCollectionBtn" class="btn btn-glass btn-tiny">New</button>
+                <button type="button" id="importCollectionBtn" class="btn btn-glass btn-tiny">Import</button>
+                <input type="file" id="importCollectionFile" accept="application/json" class="visually-hidden" />
+              </div>
+            </div>
+            <div id="collectionsMount" class="collections-mount"></div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-head">
+              <h2 class="sidebar-title">History</h2>
+              <button type="button" id="clearHistoryBtn" class="btn btn-glass btn-tiny">Clear</button>
+            </div>
+            <div id="builderHistoryMount" class="history-mount"></div>
+          </div>
+        </aside>
+
+        <section class="builder-main panel">
+          <div class="builder-env-row">
+            <label class="field env-field">
+              <span>Environment</span>
+              <select id="envSelect" class="select-violet"></select>
+            </label>
+            <button type="button" id="envManageBtn" class="btn btn-glass">Manage</button>
+          </div>
+
+          <div class="builder-request-line">
+            <select id="builderMethod" class="select-violet method-select" aria-label="HTTP method">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+              <option>DELETE</option>
+              <option>OPTIONS</option>
+            </select>
+            <div class="builder-url-wrap">
+              <input id="builderUrl" type="text" class="builder-url-input" placeholder="https://api.example.com/v1/resource" spellcheck="false" />
+              <div id="builderUrlHighlight" class="builder-url-highlight is-hidden" aria-hidden="true"></div>
+            </div>
+            <button type="button" id="builderSaveBtn" class="btn btn-glass">Save</button>
+            <button type="button" id="builderSendBtn" class="btn btn-primary">Send</button>
+          </div>
+
+          <div class="builder-subtabs" role="tablist" aria-label="Request parts">
+            <button type="button" class="builder-subtab is-active" data-subtab="headers" role="tab">Headers</button>
+            <button type="button" class="builder-subtab" data-subtab="body" role="tab">Body</button>
+            <button type="button" class="builder-subtab" data-subtab="auth" role="tab">Auth</button>
+            <button type="button" class="builder-subtab" data-subtab="params" role="tab">Params</button>
+          </div>
+
+          <div id="subtabHeaders" class="builder-subpanel">
+            <div id="headersRows" class="kv-rows"></div>
+            <button type="button" id="addHeaderRow" class="btn btn-glass btn-block">Add Row</button>
+          </div>
+
+          <div id="subtabBody" class="builder-subpanel is-hidden">
+            <div class="body-toolbar">
+              <label class="field micro-field">
+                <span>Format</span>
+                <select id="bodyFormatSelect" class="select-violet">
+                  <option value="json">JSON</option>
+                  <option value="text">Text</option>
+                  <option value="form">Form</option>
+                </select>
+              </label>
+              <button type="button" id="bodyFormatJsonBtn" class="btn btn-glass btn-micro">Format</button>
+              <button
+                type="button"
+                id="bodyAiGenerateBtn"
+                class="btn btn-glass btn-micro"
+                title="Set GEMINI_API_KEY in .env to enable AI generation"
+              >
+                ✦ Generate
+              </button>
+            </div>
+            <div id="bodyAiBar" class="ai-inline-bar is-hidden">
+              <input
+                id="bodyAiPrompt"
+                type="text"
+                class="ai-inline-input"
+                placeholder="e.g. Stripe payment webhook, user login payload, create order request for an ecommerce API"
+                autocomplete="off"
+              />
+              <button type="button" id="bodyAiSendBtn" class="btn btn-primary btn-icon" aria-label="Generate">➤</button>
+              <span id="bodyAiSpinner" class="ai-spinner is-hidden" aria-hidden="true"></span>
+            </div>
+            <p id="bodyAiError" class="inline-error is-hidden" role="alert"></p>
+            <textarea id="builderBodyText" class="builder-body-textarea" rows="12" spellcheck="false"></textarea>
+            <div id="formFieldsMount" class="kv-rows is-hidden"></div>
+            <button type="button" id="addFormRow" class="btn btn-glass btn-block is-hidden">Add Field</button>
+          </div>
+
+          <div id="subtabAuth" class="builder-subpanel is-hidden">
             <div class="field-grid">
               <label class="field">
                 <span>Auth Type</span>
-                <select id="authType" name="authType">
-                  <option value="NONE">NONE</option>
-                  <option value="API_KEY">API_KEY</option>
-                  <option value="BEARER">BEARER</option>
+                <select id="builderAuthType" class="select-violet">
+                  <option value="NONE">None</option>
+                  <option value="BEARER">Bearer</option>
+                  <option value="API_KEY">API Key</option>
+                  <option value="BASIC">Basic</option>
                 </select>
               </label>
-
-              <label class="field auth-group" id="apiKeyHeaderGroup">
-                <span>API Key Header</span>
-                <input id="apiKeyHeaderName" name="apiKeyHeaderName" type="text" />
-              </label>
-
-              <label class="field auth-group" id="apiKeyValueGroup">
-                <span>API Key Value</span>
-                <input id="apiKeyValue" name="apiKeyValue" type="text" />
-              </label>
-
-              <label class="field auth-group" id="bearerGroup">
-                <span>Bearer Token</span>
-                <input id="bearerToken" name="bearerToken" type="text" />
+            </div>
+            <div id="authBearerGroup" class="auth-builder-group">
+              <label class="field">
+                <span>Token</span>
+                <input id="authBearerToken" type="text" autocomplete="off" />
               </label>
             </div>
-          </section>
-
-          <section class="form-section">
-            <h2>Response</h2>
-            <div class="field-grid three-col">
+            <div id="authApiKeyGroup" class="auth-builder-group is-hidden">
               <label class="field">
-                <span>Status Code</span>
-                <input id="defaultStatusCode" name="defaultStatusCode" type="number" min="100" max="599" />
+                <span>Header name</span>
+                <input id="authApiKeyHeader" type="text" placeholder="x-api-key" autocomplete="off" />
               </label>
-
               <label class="field">
-                <span>Retry Sequence</span>
-                <input id="statusCodes" name="statusCodes" type="text" placeholder="503, 503, 200" />
-              </label>
-
-              <label class="field">
-                <span>Delay (ms)</span>
-                <input id="responseDelayMs" name="responseDelayMs" type="number" min="0" />
+                <span>Header value</span>
+                <input id="authApiKeyValue" type="text" autocomplete="off" />
               </label>
             </div>
-          </section>
-
-          <section class="form-section">
-            <h2>Body &amp; Headers</h2>
-            <div class="field-grid split">
+            <div id="authBasicGroup" class="auth-builder-group is-hidden">
               <label class="field">
-                <span>Response Headers (JSON)</span>
-                <textarea id="responseHeaders" name="responseHeaders" rows="10"></textarea>
+                <span>Username</span>
+                <input id="authBasicUser" type="text" autocomplete="off" />
               </label>
-
               <label class="field">
-                <span>Response Body</span>
-                <textarea id="responseBody" name="responseBody" rows="10"></textarea>
+                <span>Password</span>
+                <input id="authBasicPass" type="password" autocomplete="off" />
               </label>
             </div>
-          </section>
-
-          <div class="save-row">
-            <p id="saveStatus" class="save-status" aria-live="polite"></p>
-            <button id="saveBtn" type="submit" class="btn btn-primary save-btn">Save Endpoint Config</button>
           </div>
-        </form>
 
-        <section class="profiles-section">
-          <h2>Profiles</h2>
-          <div class="profiles-actions">
-            <input id="profileNameInput" type="text" placeholder="profile name" />
-            <button id="saveProfileBtn" type="button" class="btn btn-glass">Save Profile</button>
+          <div id="subtabParams" class="builder-subpanel is-hidden">
+            <div id="paramsRows" class="kv-rows"></div>
+            <button type="button" id="addParamRow" class="btn btn-glass btn-block">Add Row</button>
           </div>
-          <div id="profilesList" class="profiles-list"></div>
+
+          <div id="builderResponsePanel" class="builder-response panel-inner is-hidden">
+            <div class="response-summary">
+              <span id="respStatusBadge" class="status-badge-pill">000</span>
+              <span id="respMeta" class="response-meta"></span>
+              <button type="button" id="respCopyBtn" class="btn btn-glass btn-micro">Copy body</button>
+            </div>
+            <div class="response-subtabs">
+              <button type="button" class="resp-subtab is-active" data-resptab="body">Body</button>
+              <button type="button" class="resp-subtab" data-resptab="headers">Headers</button>
+              <button type="button" class="resp-subtab" data-resptab="raw">Raw</button>
+            </div>
+            <div id="respPanelBody" class="resp-panel">
+              <pre id="respBodyOut" class="resp-pre"></pre>
+            </div>
+            <div id="respPanelHeaders" class="resp-panel is-hidden">
+              <pre id="respHeadersOut" class="resp-pre"></pre>
+            </div>
+            <div id="respPanelRaw" class="resp-panel is-hidden">
+              <pre id="respRawOut" class="resp-pre"></pre>
+            </div>
+            <p id="respWarnings" class="resp-warnings is-hidden"></p>
+          </div>
         </section>
-      </section>
+      </div>
+    </div>
 
-      <section class="panel logs-panel">
-        <div class="panel-header logs-header">
-          <div class="requests-title-wrap">
-            <h1 class="panel-title">Requests</h1>
-            <span id="logCount" class="count-pill">0</span>
+    <div id="modalBackdrop" class="modal-backdrop is-hidden" hidden></div>
+
+    <div id="saveRequestModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="saveReqTitle" hidden>
+      <div class="modal-header">
+        <h2 id="saveReqTitle" class="modal-title">Save request</h2>
+        <button type="button" class="btn btn-glass btn-icon modal-close" data-close-modal="save">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>Collection</span>
+          <select id="saveReqCollection" class="select-violet"></select>
+        </label>
+        <label class="field">
+          <span>Request name</span>
+          <input id="saveReqName" type="text" placeholder="List users" />
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-glass" data-close-modal="save">Cancel</button>
+        <button type="button" id="saveReqConfirmBtn" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+
+    <div id="envModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="envModalTitle" hidden>
+      <div class="modal-header">
+        <h2 id="envModalTitle" class="modal-title">Environments</h2>
+        <button type="button" class="btn btn-glass btn-icon modal-close" data-close-modal="env">×</button>
+      </div>
+      <div class="modal-body env-modal-body">
+        <div class="env-list-panel">
+          <div class="env-list-head">
+            <button type="button" id="newEnvBtn" class="btn btn-glass btn-tiny">New</button>
           </div>
-          <div class="logs-toolbar">
-            <input id="logSearch" type="search" placeholder="Search requests..." />
-            <button id="clearLogsBtn" class="btn btn-glass" type="button">Clear</button>
-          </div>
+          <div id="envListMount" class="env-list"></div>
         </div>
-        <div id="logs" class="logs" aria-live="polite"></div>
-      </section>
-    </main>
+        <div class="env-editor-panel">
+          <h3 class="env-editor-title">Variables</h3>
+          <div id="envVarRows" class="kv-rows"></div>
+          <button type="button" id="addEnvVarRow" class="btn btn-glass btn-block">Add variable</button>
+          <p class="env-hint">Mark values as secret to mask them in the UI after save.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-glass" data-close-modal="env">Close</button>
+        <button type="button" id="saveEnvVarsBtn" class="btn btn-primary">Save variables</button>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>

@@ -354,25 +354,55 @@
     <div id="envModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="envModalTitle" hidden>
       <div class="modal-header">
         <h2 id="envModalTitle" class="modal-title">Environments</h2>
-        <button type="button" class="btn btn-glass btn-icon modal-close" data-close-modal="env">×</button>
+        <button type="button" class="btn btn-glass btn-icon modal-close env-modal-close" data-close-modal="env" aria-label="Close environments">×</button>
       </div>
       <div class="modal-body env-modal-body">
         <div class="env-list-panel">
           <div class="env-list-head">
-            <button type="button" id="newEnvBtn" class="btn btn-glass btn-tiny">New</button>
+            <h3 class="env-section-title">Environments</h3>
+            <button type="button" id="newEnvBtn" class="btn btn-glass btn-tiny env-list-add-btn">New</button>
           </div>
           <div id="envListMount" class="env-list"></div>
         </div>
         <div class="env-editor-panel">
-          <h3 class="env-editor-title">Variables</h3>
+          <h3 class="env-editor-title env-section-title">Variables</h3>
           <div id="envVarRows" class="kv-rows"></div>
-          <button type="button" id="addEnvVarRow" class="btn btn-glass btn-block">Add variable</button>
+          <button type="button" id="addEnvVarRow" class="btn btn-glass btn-block env-add-var-btn">Add variable</button>
           <p class="env-hint">Mark values as secret to mask them in the UI after save.</p>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer env-modal-footer">
         <button type="button" class="btn btn-glass" data-close-modal="env">Close</button>
         <button type="button" id="saveEnvVarsBtn" class="btn btn-primary">Save variables</button>
+      </div>
+    </div>
+
+    <div
+      id="envPromptModal"
+      class="modal modal-nested panel is-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="envPromptTitle"
+      aria-describedby="envPromptDescription"
+      hidden
+    >
+      <div class="modal-header env-prompt-header">
+        <div class="env-prompt-title-wrap">
+          <p class="env-prompt-eyebrow">localhost:8787</p>
+          <h2 id="envPromptTitle" class="modal-title">New environment</h2>
+        </div>
+        <button type="button" class="btn btn-glass btn-icon modal-close env-modal-close" id="envPromptCloseBtn" aria-label="Close new environment dialog">×</button>
+      </div>
+      <div class="modal-body env-prompt-body">
+        <p id="envPromptDescription" class="env-prompt-copy">Create a named variable set for request values.</p>
+        <label class="field env-prompt-field">
+          <span>Environment name</span>
+          <input id="envPromptInput" type="text" placeholder="Local" autocomplete="off" />
+        </label>
+      </div>
+      <div class="modal-footer env-modal-footer">
+        <button type="button" id="envPromptCancelBtn" class="btn btn-glass">Cancel</button>
+        <button type="button" id="envPromptConfirmBtn" class="btn btn-primary">OK</button>
       </div>
     </div>
 

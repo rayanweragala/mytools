@@ -89,6 +89,11 @@ const envListMountEl = document.getElementById("envListMount");
 const envVarRowsEl = document.getElementById("envVarRows");
 const addEnvVarRowBtn = document.getElementById("addEnvVarRow");
 const saveEnvVarsBtn = document.getElementById("saveEnvVarsBtn");
+const envPromptModalEl = document.getElementById("envPromptModal");
+const envPromptInputEl = document.getElementById("envPromptInput");
+const envPromptCloseBtn = document.getElementById("envPromptCloseBtn");
+const envPromptCancelBtn = document.getElementById("envPromptCancelBtn");
+const envPromptConfirmBtn = document.getElementById("envPromptConfirmBtn");
 
 const authGroups = {
   apiKeyHeaderGroup: document.getElementById("apiKeyHeaderGroup"),
@@ -145,6 +150,7 @@ let openCollectionMenuId = null;
 
 let selectedEnvEditId = null;
 let envVarDraft = [];
+let envPromptResolver = null;
 
 let syncingParamsFromUrl = false;
 
@@ -951,6 +957,21 @@ function openModal(kind) {
   }
 }
 
+function closeEnvPrompt(result = null) {
+  if (envPromptModalEl) {
+    envPromptModalEl.hidden = true;
+    envPromptModalEl.classList.add("is-hidden");
+  }
+  if (envPromptInputEl) {
+    envPromptInputEl.value = "";
+  }
+  const resolver = envPromptResolver;
+  envPromptResolver = null;
+  if (resolver) {
+    resolver(result);
+  }
+}
+
 function closeModals() {
   modalBackdropEl.hidden = true;
   modalBackdropEl.classList.add("is-hidden");
@@ -958,6 +979,19 @@ function closeModals() {
   saveRequestModalEl.classList.add("is-hidden");
   envModalEl.hidden = true;
   envModalEl.classList.add("is-hidden");
+  closeEnvPrompt();
+}
+
+function openEnvPrompt() {
+  return new Promise((resolve) => {
+    envPromptResolver = resolve;
+    modalBackdropEl.hidden = false;
+    modalBackdropEl.classList.remove("is-hidden");
+    envPromptModalEl.hidden = false;
+    envPromptModalEl.classList.remove("is-hidden");
+    envPromptInputEl.value = "";
+    queueMicrotask(() => envPromptInputEl?.focus());
+  });
 }
 
 function renderEnvModalList() {
@@ -1007,10 +1041,14 @@ function renderEnvVarRows() {
       const sec = row.secret ? "checked" : "";
       return `
         <div class="kv-row env-var-row" data-idx="${idx}">
-          <input type="text" data-field="key" value="${escapeHtml(row.key)}" placeholder="KEY" />
-          <input type="text" data-field="value" value="${escapeHtml(row.value)}" placeholder="value" />
-          <label class="secret-toggle"><input type="checkbox" data-field="secret" ${sec} /> secret</label>
-          <button type="button" class="btn btn-glass btn-tiny" data-action="delete-env-var">✕</button>
+          <input type="text" class="env-var-input" data-field="key" value="${escapeHtml(row.key)}" placeholder="KEY" />
+          <input type="text" class="env-var-input" data-field="value" value="${escapeHtml(row.value)}" placeholder="VALUE" />
+          <label class="secret-toggle" aria-label="Mark variable as secret">
+            <input type="checkbox" data-field="secret" ${sec} />
+            <span class="secret-toggle-track" aria-hidden="true"></span>
+            <span class="secret-toggle-label">Secret</span>
+          </label>
+          <button type="button" class="btn btn-glass btn-tiny env-row-delete-btn" data-action="delete-env-var" aria-label="Delete variable">✕</button>
         </div>`;
     })
     .join("");
@@ -1828,7 +1866,7 @@ document.querySelectorAll(".resp-subtab").forEach((btn) => {
 });
 
 newEnvBtn.addEventListener("click", async () => {
-  const name = prompt("Environment name");
+  const name = await openEnvPrompt();
   if (!name || !name.trim()) {
     return;
   }
@@ -1877,6 +1915,21 @@ envListMountEl.addEventListener("click", async (event) => {
 addEnvVarRowBtn.addEventListener("click", () => {
   envVarDraft.push({ key: "", value: "", secret: false });
   renderEnvVarRows();
+});
+
+envPromptCloseBtn?.addEventListener("click", () => closeEnvPrompt());
+envPromptCancelBtn?.addEventListener("click", () => closeEnvPrompt());
+envPromptConfirmBtn?.addEventListener("click", () => closeEnvPrompt(envPromptInputEl?.value.trim() || ""));
+envPromptInputEl?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    closeEnvPrompt(envPromptInputEl?.value.trim() || "");
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeEnvPrompt();
+  }
 });
 
 saveEnvVarsBtn.addEventListener("click", async () => {

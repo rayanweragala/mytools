@@ -55,7 +55,6 @@ const blockedReplayHeaders = new Set([
 const pendingReplaySignatures = new Map<string, number>();
 let tunnelUrl: string | null = null;
 const tunnelPortPattern = new RegExp(`:${PORT}$`);
-const tunnelName = `webhook-lab-${PORT}`;
 
 function delay(ms: number): Promise<void> {
   if (!ms || ms <= 0) {
@@ -231,10 +230,6 @@ function choosePreferredTunnel(tunnels: ngrok.Ngrok.Tunnel[]): ngrok.Ngrok.Tunne
   if (tunnels.length === 0) {
     return null;
   }
-  const namedTunnel = tunnels.find((tunnel) => tunnel.name === tunnelName);
-  if (namedTunnel) {
-    return namedTunnel;
-  }
   const httpsTunnel = tunnels.find((tunnel) => tunnel.proto === "https");
   return httpsTunnel || tunnels[0];
 }
@@ -281,11 +276,6 @@ async function findExistingTunnelUrl(maybeError?: unknown): Promise<string | nul
     }
   }
 
-  const appNamedTunnel = tunnels.find((tunnel) => tunnel.name === tunnelName);
-  if (appNamedTunnel?.public_url) {
-    return appNamedTunnel.public_url;
-  }
-
   const matchingByPort = tunnels.filter(isTunnelForPort);
   const tunnel = choosePreferredTunnel(matchingByPort);
   return tunnel?.public_url || null;
@@ -316,9 +306,27 @@ function extractNgrokErrorMessage(error: unknown): string {
 async function tryStartTunnel(authtoken: string): Promise<string> {
   return ngrok.connect({
     addr: PORT,
-    name: tunnelName,
     ...(authtoken ? { authtoken } : {})
   });
+}
+
+async function clearConflictingTunnel(error: unknown): Promise<boolean> {
+  const existingName = extractExistingTunnelName(error);
+  if (!existingName) {
+    return false;
+  }
+
+  const api = ngrok.getApi();
+  if (!api) {
+    return false;
+  }
+
+  try {
+    await api.stopTunnel(existingName);
+    return true;
+  } catch (_stopError) {
+    return false;
+  }
 }
 
 const app = express();
@@ -421,43 +429,51 @@ app.post("/api/tunnel/start", async (_req, res) => {
     return;
   }
 
-  try {
-    const rawToken = process.env.NGROK_AUTHTOKEN;
-    const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
-    tunnelUrl = await tryStartTunnel(authtoken);
+  const rawToken = process.env.NGROK_AUTHTOKEN;
+  const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
+  let startError: unknown = null;
 
-    res.json({ active: true, url: tunnelUrl });
-  } catch (error) {
-    const recoveredUrl = await findExistingTunnelUrl(error);
-    if (recoveredUrl) {
-      tunnelUrl = recoveredUrl;
-      res.json({ active: true, url: tunnelUrl });
-      return;
-    }
-
-    const rawToken = process.env.NGROK_AUTHTOKEN;
-    const authtoken = typeof rawToken === "string" ? rawToken.trim() : "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await ngrok.kill();
       tunnelUrl = await tryStartTunnel(authtoken);
       res.json({ active: true, url: tunnelUrl });
       return;
-    } catch (restartError) {
-      const recoveredAfterRestart = await findExistingTunnelUrl(restartError);
-      if (recoveredAfterRestart) {
-        tunnelUrl = recoveredAfterRestart;
+    } catch (error) {
+      startError = error;
+      const recoveredUrl = await findExistingTunnelUrl(error);
+      if (recoveredUrl) {
+        tunnelUrl = recoveredUrl;
         res.json({ active: true, url: tunnelUrl });
         return;
       }
 
-      tunnelUrl = null;
-      res.status(500).json({
-        active: false,
-        url: null,
-        error: "Failed to start tunnel",
-        details: extractNgrokErrorMessage(restartError)
-      });
+      const cleared = await clearConflictingTunnel(error);
+      if (!cleared) {
+        break;
+      }
     }
+  }
+
+  try {
+    await ngrok.kill();
+    tunnelUrl = await tryStartTunnel(authtoken);
+    res.json({ active: true, url: tunnelUrl });
+    return;
+  } catch (restartError) {
+    const recoveredAfterRestart = await findExistingTunnelUrl(restartError);
+    if (recoveredAfterRestart) {
+      tunnelUrl = recoveredAfterRestart;
+      res.json({ active: true, url: tunnelUrl });
+      return;
+    }
+
+    tunnelUrl = null;
+    res.status(500).json({
+      active: false,
+      url: null,
+      error: "Failed to start tunnel",
+      details: extractNgrokErrorMessage(restartError ?? startError)
+    });
   }
 });
 

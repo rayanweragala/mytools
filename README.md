@@ -19,6 +19,29 @@ npm run dev
 
 Open `http://localhost:8787`.
 
+## One-command worker setup (background)
+
+Use this when sharing internally so nobody has to remember install/run steps:
+
+```bash
+npm run worker:up
+```
+
+What it does:
+- Installs dependencies automatically when needed.
+- Starts `npm run dev` in the background.
+- Saves PID/logs under `.run/`.
+
+Useful commands:
+
+```bash
+npm run worker:status
+npm run worker:logs
+npm run worker:stop
+npm run worker:restart
+```
+
+
 ## Optional ngrok token
 
 ```bash

@@ -18,3 +18,6 @@ data/
 .idea/
 .claude/
 .codex
+
+# Worker runtime artifacts
+.run/

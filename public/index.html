@@ -22,6 +22,7 @@
         <span class="chaos-pulse" id="chaosPulse" aria-hidden="true"></span>
       </div>
       <div class="topbar-right">
+        <button id="onboardingReplayBtn" class="btn btn-glass" type="button">Guide</button>
         <button id="chatToggleBtn" class="btn btn-glass btn-icon chat-toggle-btn" type="button" aria-label="Open assistant">✦</button>
         <button id="tunnelToggleBtn" class="btn btn-primary" type="button">Start Tunnel</button>
         <button id="tunnelUrl" class="tunnel-url" type="button" title="Copy tunnel URL">Tunnel inactive</button>
@@ -363,6 +364,24 @@
 
     <div id="modalBackdrop" class="modal-backdrop is-hidden" hidden></div>
 
+    <div id="actionModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="actionModalTitle" hidden>
+      <div class="modal-header">
+        <h2 id="actionModalTitle" class="modal-title">Confirm action</h2>
+        <button type="button" id="actionModalCloseBtn" class="btn btn-glass btn-icon modal-close" aria-label="Close dialog">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="actionModalMessage" class="modal-copy"></p>
+        <label id="actionModalInputWrap" class="field is-hidden">
+          <span id="actionModalInputLabel">Value</span>
+          <input id="actionModalInput" type="text" autocomplete="off" />
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="actionModalCancelBtn" class="btn btn-glass">Cancel</button>
+        <button type="button" id="actionModalConfirmBtn" class="btn btn-primary">Confirm</button>
+      </div>
+    </div>
+
     <div id="saveRequestModal" class="modal panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="saveReqTitle" hidden>
       <div class="modal-header">
         <h2 id="saveReqTitle" class="modal-title">Save request</h2>
@@ -476,6 +495,22 @@
     </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+
+    <div id="onboardingLayer" class="onboarding-layer is-hidden" hidden>
+      <div id="onboardingHighlight" class="onboarding-highlight" aria-hidden="true"></div>
+      <section id="onboardingCard" class="onboarding-card panel" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+        <p id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 6</p>
+        <h2 id="onboardingTitle" class="onboarding-title">Welcome to mytools</h2>
+        <p id="onboardingBody" class="onboarding-body"></p>
+        <div class="onboarding-actions">
+          <button type="button" id="onboardingSkipBtn" class="btn btn-glass">Skip</button>
+          <div class="onboarding-nav">
+            <button type="button" id="onboardingPrevBtn" class="btn btn-glass">Back</button>
+            <button type="button" id="onboardingNextBtn" class="btn btn-primary">Next</button>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <script src="/app.js"></script>
   </body>

@@ -20,6 +20,7 @@ const tunnelToggleBtn = document.getElementById("tunnelToggleBtn");
 const tunnelUrlEl = document.getElementById("tunnelUrl");
 const tunnelCopyTooltipEl = document.getElementById("tunnelCopyTooltip");
 const simAiGenerateBtn = document.getElementById("simAiGenerateBtn");
+const onboardingReplayBtn = document.getElementById("onboardingReplayBtn");
 const chatToggleBtn = document.getElementById("chatToggleBtn");
 const chatPanelEl = document.getElementById("chatPanel");
 const chatCloseBtn = document.getElementById("chatCloseBtn");
@@ -95,6 +96,15 @@ const builderHistoryMountEl = document.getElementById("builderHistoryMount");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
 const modalBackdropEl = document.getElementById("modalBackdrop");
+const actionModalEl = document.getElementById("actionModal");
+const actionModalTitleEl = document.getElementById("actionModalTitle");
+const actionModalMessageEl = document.getElementById("actionModalMessage");
+const actionModalInputWrapEl = document.getElementById("actionModalInputWrap");
+const actionModalInputLabelEl = document.getElementById("actionModalInputLabel");
+const actionModalInputEl = document.getElementById("actionModalInput");
+const actionModalCloseBtn = document.getElementById("actionModalCloseBtn");
+const actionModalCancelBtn = document.getElementById("actionModalCancelBtn");
+const actionModalConfirmBtn = document.getElementById("actionModalConfirmBtn");
 const saveRequestModalEl = document.getElementById("saveRequestModal");
 const saveReqCollectionEl = document.getElementById("saveReqCollection");
 const saveReqNameEl = document.getElementById("saveReqName");
@@ -121,6 +131,15 @@ const envPromptInputEl = document.getElementById("envPromptInput");
 const envPromptCloseBtn = document.getElementById("envPromptCloseBtn");
 const envPromptCancelBtn = document.getElementById("envPromptCancelBtn");
 const envPromptConfirmBtn = document.getElementById("envPromptConfirmBtn");
+const onboardingLayerEl = document.getElementById("onboardingLayer");
+const onboardingHighlightEl = document.getElementById("onboardingHighlight");
+const onboardingCardEl = document.getElementById("onboardingCard");
+const onboardingStepLabelEl = document.getElementById("onboardingStepLabel");
+const onboardingTitleEl = document.getElementById("onboardingTitle");
+const onboardingBodyEl = document.getElementById("onboardingBody");
+const onboardingSkipBtn = document.getElementById("onboardingSkipBtn");
+const onboardingPrevBtn = document.getElementById("onboardingPrevBtn");
+const onboardingNextBtn = document.getElementById("onboardingNextBtn");
 
 const authGroups = {
   apiKeyHeaderGroup: document.getElementById("apiKeyHeaderGroup"),
@@ -187,12 +206,18 @@ const expandedGeneratedTests = new Set();
 let selectedEnvEditId = null;
 let envVarDraft = [];
 let envPromptResolver = null;
+let actionModalResolver = null;
+let actionModalNeedsInput = false;
 
 let syncingParamsFromUrl = false;
 let chatOpen = false;
 let chatLoading = false;
 let chatSessionId = "";
 let chatHistory = [];
+let onboardingActive = false;
+let onboardingStepIndex = 0;
+
+const ONBOARDING_COOKIE = "mytools_onboarding_complete";
 
 function setSaveStatus(message, type = "info") {
   saveStatusEl.textContent = message;
@@ -784,6 +809,120 @@ function showToast(message, type = "success") {
   }, 3000);
 }
 
+function getCookie(name) {
+  const target = `${name}=`;
+  const parts = String(document.cookie || "").split(";");
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(target)) {
+      return decodeURIComponent(trimmed.slice(target.length));
+    }
+  }
+  return "";
+}
+
+function setCookie(name, value, maxAgeSeconds) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
+}
+
+function resolveActionModal(value, options = { sync: true }) {
+  if (actionModalEl) {
+    actionModalEl.hidden = true;
+    actionModalEl.classList.add("is-hidden");
+  }
+  if (actionModalInputEl) {
+    actionModalInputEl.value = "";
+  }
+  actionModalNeedsInput = false;
+  const resolver = actionModalResolver;
+  actionModalResolver = null;
+  if (resolver) {
+    resolver(value);
+  }
+  if (options.sync !== false) {
+    syncModalBackdrop();
+  }
+}
+
+function syncModalBackdrop() {
+  const modalNodes = [actionModalEl, saveRequestModalEl, curlImportModalEl, testsPreviewModalEl, envModalEl, envPromptModalEl];
+  const hasOpenModal = modalNodes.some((node) => Boolean(node && !node.hidden && !node.classList.contains("is-hidden")));
+  modalBackdropEl.hidden = !hasOpenModal;
+  modalBackdropEl.classList.toggle("is-hidden", !hasOpenModal);
+}
+
+function openActionModal({
+  title,
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  confirmTone = "primary",
+  inputLabel = "",
+  inputPlaceholder = "",
+  inputValue = ""
+}) {
+  return new Promise((resolve) => {
+    actionModalResolver = resolve;
+    actionModalNeedsInput = Boolean(inputLabel);
+    modalBackdropEl.hidden = false;
+    modalBackdropEl.classList.remove("is-hidden");
+    actionModalTitleEl.textContent = title;
+    actionModalMessageEl.textContent = message;
+    actionModalConfirmBtn.textContent = confirmLabel;
+    actionModalCancelBtn.textContent = cancelLabel;
+    actionModalConfirmBtn.classList.toggle("btn-danger", confirmTone === "danger");
+    actionModalInputWrapEl.classList.toggle("is-hidden", !actionModalNeedsInput);
+    actionModalInputLabelEl.textContent = inputLabel || "Value";
+    actionModalInputEl.placeholder = inputPlaceholder;
+    actionModalInputEl.value = inputValue;
+    actionModalEl.hidden = false;
+    actionModalEl.classList.remove("is-hidden");
+    queueMicrotask(() => {
+      if (actionModalNeedsInput) {
+        actionModalInputEl?.focus();
+      } else {
+        actionModalConfirmBtn?.focus();
+      }
+    });
+  });
+}
+
+async function askConfirm({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "primary" }) {
+  const result = await openActionModal({
+    title,
+    message,
+    confirmLabel,
+    cancelLabel,
+    confirmTone: tone
+  });
+  return result === true;
+}
+
+async function askPrompt({
+  title,
+  message,
+  inputLabel,
+  placeholder = "",
+  confirmLabel = "Save",
+  cancelLabel = "Cancel",
+  initialValue = ""
+}) {
+  const result = await openActionModal({
+    title,
+    message,
+    confirmLabel,
+    cancelLabel,
+    inputLabel,
+    inputPlaceholder: placeholder,
+    inputValue: initialValue
+  });
+  if (typeof result !== "string") {
+    return null;
+  }
+  const normalized = result.trim();
+  return normalized || null;
+}
+
 function bodyPreview(body) {
   const text = typeof body === "string" ? body : prettyJson(body ?? "");
   return text.trim() || "(empty)";
@@ -839,7 +978,7 @@ function renderChatMessages() {
   const messagesHtml = chatHistory
     .map((message) => {
       const roleClass = message.role === "user" ? "chat-msg-user" : "chat-msg-ai";
-      return `<article class="chat-message ${roleClass}"><div class="chat-bubble">${renderChatContent(message.content)}</div></article>`;
+      return `<article class="chat-message ${roleClass}"><div class="chat-bubble"><div class="chat-bubble-content">${renderChatContent(message.content)}</div></div></article>`;
     })
     .join("");
 
@@ -847,7 +986,7 @@ function renderChatMessages() {
     ? `
       <article class="chat-message chat-msg-ai">
         <div class="chat-bubble chat-typing">
-          <span></span><span></span><span></span>
+          <div class="chat-typing-dots"><span></span><span></span><span></span></div>
         </div>
       </article>`
     : "";
@@ -916,6 +1055,174 @@ async function sendChatMessage(rawMessage) {
   }
 }
 
+const onboardingSteps = [
+  {
+    targetId: "chaosControls",
+    title: "Step 1: Chaos Mode (optional)",
+    body: "Use Chaos Mode to intentionally create random failures, so you can confirm your system handles retries and errors correctly.",
+    tab: "simulator"
+  },
+  {
+    targetId: "endpointTabs",
+    title: "Step 2: Choose an Endpoint",
+    body: "Each tab is a webhook route. Pick one route, then configure auth, status code, delay, headers, and response body for that route.",
+    tab: "simulator"
+  },
+  {
+    targetId: "saveBtn",
+    title: "Step 3: Save Your Setup",
+    body: "After editing settings, click Save Endpoint Config to apply your simulator behavior.",
+    tab: "simulator"
+  },
+  {
+    targetId: "tunnelToggleBtn",
+    title: "Step 4: Shareable Tunnel",
+    body: "Start Tunnel to expose your local webhook URL so external systems can send real requests to your simulator.",
+    tab: "simulator"
+  },
+  {
+    targetId: "logs",
+    title: "Step 5: Watch Live Requests",
+    body: "Every incoming request appears here. Open any row to inspect payload, headers, auth result, and response details.",
+    tab: "simulator"
+  },
+  {
+    targetId: "tabBuilder",
+    title: "Step 6: Switch to Builder",
+    body: "Builder mode helps you craft and send API requests manually, then inspect response body, headers, and raw output.",
+    tab: "builder"
+  },
+  {
+    targetId: "newCollectionBtn",
+    title: "Step 7: Save Collections",
+    body: "Create collections to organize reusable requests for smoke tests, QA scenarios, and release checks.",
+    tab: "builder"
+  },
+  {
+    targetId: "chatToggleBtn",
+    title: "Step 8: Ask Assistant",
+    body: "Use Ask mytools for quick summaries in plain language, like configured endpoints, saved collections, or failed requests.",
+    tab: "simulator"
+  }
+];
+
+function ensureOnboardingTargetTab(step) {
+  if (!step?.tab) {
+    return;
+  }
+  if (getMainTab() !== step.tab) {
+    setMainTab(step.tab);
+  }
+}
+
+function positionOnboardingCard(rect) {
+  if (!onboardingCardEl || !onboardingHighlightEl) {
+    return;
+  }
+  const margin = 12;
+  const pad = 6;
+  onboardingHighlightEl.style.left = `${Math.max(margin, rect.left - pad)}px`;
+  onboardingHighlightEl.style.top = `${Math.max(margin, rect.top - pad)}px`;
+  onboardingHighlightEl.style.width = `${Math.min(window.innerWidth - margin * 2, rect.width + pad * 2)}px`;
+  onboardingHighlightEl.style.height = `${Math.min(window.innerHeight - margin * 2, rect.height + pad * 2)}px`;
+
+  const cardRect = onboardingCardEl.getBoundingClientRect();
+  let top = rect.bottom + 16;
+  if (top + cardRect.height > window.innerHeight - margin) {
+    top = rect.top - cardRect.height - 16;
+  }
+  if (top < margin) {
+    top = margin;
+  }
+
+  let left = rect.left;
+  if (left + cardRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - cardRect.width - margin;
+  }
+  if (left < margin) {
+    left = margin;
+  }
+
+  onboardingCardEl.style.left = `${left}px`;
+  onboardingCardEl.style.top = `${top}px`;
+}
+
+function renderOnboardingStep() {
+  if (!onboardingActive || !onboardingLayerEl) {
+    return;
+  }
+  const step = onboardingSteps[onboardingStepIndex];
+  if (!step) {
+    stopOnboarding(false);
+    return;
+  }
+
+  ensureOnboardingTargetTab(step);
+  const target = document.getElementById(step.targetId);
+  if (!target) {
+    if (onboardingStepIndex >= onboardingSteps.length - 1) {
+      stopOnboarding(false);
+      return;
+    }
+    onboardingStepIndex += 1;
+    renderOnboardingStep();
+    return;
+  }
+
+  onboardingStepLabelEl.textContent = `Step ${onboardingStepIndex + 1} of ${onboardingSteps.length}`;
+  onboardingTitleEl.textContent = step.title;
+  onboardingBodyEl.textContent = step.body;
+  onboardingPrevBtn.disabled = onboardingStepIndex === 0;
+  onboardingNextBtn.textContent = onboardingStepIndex === onboardingSteps.length - 1 ? "Finish" : "Next";
+
+  const targetRect = target.getBoundingClientRect();
+  if (targetRect.bottom < 0 || targetRect.top > window.innerHeight) {
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    requestAnimationFrame(syncOnboardingPosition);
+    return;
+  }
+  positionOnboardingCard(targetRect);
+}
+
+function syncOnboardingPosition() {
+  if (!onboardingActive) {
+    return;
+  }
+  renderOnboardingStep();
+}
+
+function stopOnboarding(completed) {
+  onboardingActive = false;
+  onboardingLayerEl.hidden = true;
+  onboardingLayerEl.classList.add("is-hidden");
+  window.removeEventListener("resize", syncOnboardingPosition);
+  window.removeEventListener("scroll", syncOnboardingPosition, true);
+  if (completed) {
+    setCookie(ONBOARDING_COOKIE, "1", 60 * 60 * 24 * 365);
+    showToast("Tour completed. You will not see it again on this browser.", "success");
+  }
+}
+
+function startOnboarding(force = false) {
+  if ((!force && getCookie(ONBOARDING_COOKIE) === "1") || !onboardingLayerEl) {
+    return;
+  }
+  if (onboardingActive) {
+    return;
+  }
+  onboardingActive = true;
+  onboardingStepIndex = 0;
+  onboardingLayerEl.hidden = false;
+  onboardingLayerEl.classList.remove("is-hidden");
+  renderOnboardingStep();
+  window.addEventListener("resize", syncOnboardingPosition);
+  window.addEventListener("scroll", syncOnboardingPosition, true);
+}
+
+function startOnboardingIfNeeded() {
+  startOnboarding(false);
+}
+
 /* --- Main tabs --- */
 
 function getMainTab() {
@@ -937,6 +1244,9 @@ function setMainTab(tab) {
 
   if (!isSim) {
     void refreshBuilderContext();
+  }
+  if (onboardingActive) {
+    requestAnimationFrame(syncOnboardingPosition);
   }
 }
 
@@ -1340,8 +1650,7 @@ function closeEnvPrompt(result = null) {
 }
 
 function closeModals() {
-  modalBackdropEl.hidden = true;
-  modalBackdropEl.classList.add("is-hidden");
+  resolveActionModal(null, { sync: false });
   saveRequestModalEl.hidden = true;
   saveRequestModalEl.classList.add("is-hidden");
   curlImportModalEl.hidden = true;
@@ -1353,6 +1662,8 @@ function closeModals() {
   envModalEl.hidden = true;
   envModalEl.classList.add("is-hidden");
   closeEnvPrompt();
+  modalBackdropEl.hidden = true;
+  modalBackdropEl.classList.add("is-hidden");
 }
 
 function openEnvPrompt() {
@@ -1696,7 +2007,13 @@ configForm.addEventListener("submit", async (event) => {
 });
 
 resetBtn.addEventListener("click", async () => {
-  if (!confirm("Reset all endpoint configs to defaults?")) {
+  const confirmed = await askConfirm({
+    title: "Reset endpoint configs?",
+    message: "This will restore every endpoint configuration to its default values.",
+    confirmLabel: "Reset all",
+    tone: "danger"
+  });
+  if (!confirmed) {
     return;
   }
 
@@ -1751,7 +2068,13 @@ profilesListEl.addEventListener("click", async (event) => {
   }
 
   if (action === "delete") {
-    if (!confirm("Delete this profile?")) {
+    const confirmed = await askConfirm({
+      title: "Delete profile?",
+      message: "This saved profile will be removed from your workspace.",
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) {
       return;
     }
 
@@ -2224,20 +2547,49 @@ envSelectEl.addEventListener("change", async () => {
 
 envManageBtn.addEventListener("click", () => openModal("env"));
 
-modalBackdropEl.addEventListener("click", closeModals);
+modalBackdropEl.addEventListener("click", () => {
+  if (actionModalEl && !actionModalEl.hidden && !actionModalEl.classList.contains("is-hidden")) {
+    resolveActionModal(null);
+    return;
+  }
+  closeModals();
+});
 document.querySelectorAll("[data-close-modal]").forEach((btn) => {
   btn.addEventListener("click", closeModals);
 });
+actionModalCloseBtn?.addEventListener("click", () => resolveActionModal(null));
+actionModalCancelBtn?.addEventListener("click", () => resolveActionModal(null));
+actionModalConfirmBtn?.addEventListener("click", () => {
+  const value = actionModalNeedsInput ? String(actionModalInputEl?.value || "") : true;
+  resolveActionModal(value);
+});
+actionModalInputEl?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    resolveActionModal(String(actionModalInputEl.value || ""));
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    resolveActionModal(null);
+  }
+});
 
 newCollectionBtn.addEventListener("click", async () => {
-  const name = prompt("Collection name");
-  if (!name || !name.trim()) {
+  const name = await askPrompt({
+    title: "New collection",
+    message: "Create a collection to organize saved requests.",
+    inputLabel: "Collection name",
+    placeholder: "Smoke checks",
+    confirmLabel: "Create"
+  });
+  if (!name) {
     return;
   }
   await fetch("/api/collections", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: name.trim() })
+    body: JSON.stringify({ name })
   });
   await refreshBuilderContext();
 });
@@ -2334,7 +2686,16 @@ collectionsMountEl.addEventListener("click", async (event) => {
   if (deleteCol) {
     const block = deleteCol.closest(".collection-block");
     const id = block?.getAttribute("data-collection-id");
-    if (!id || !confirm("Delete this collection?")) {
+    if (!id) {
+      return;
+    }
+    const confirmed = await askConfirm({
+      title: "Delete collection?",
+      message: "All requests inside this collection will be removed.",
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) {
       return;
     }
     await fetch(`/api/collections/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -2431,7 +2792,16 @@ collectionsMountEl.addEventListener("click", async (event) => {
     const row = deleteReq.closest(".collection-item");
     const cid = row?.getAttribute("data-collection-id");
     const rid = row?.getAttribute("data-request-id");
-    if (!cid || !rid || !confirm("Delete this saved request?")) {
+    if (!cid || !rid) {
+      return;
+    }
+    const confirmed = await askConfirm({
+      title: "Delete saved request?",
+      message: "This request will be removed from the collection.",
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) {
       return;
     }
     await fetch(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, { method: "DELETE" });
@@ -2579,7 +2949,16 @@ envListMountEl.addEventListener("click", async (event) => {
   if (del) {
     const item = del.closest(".env-item");
     const id = item?.getAttribute("data-env-id");
-    if (!id || !confirm("Delete this environment?")) {
+    if (!id) {
+      return;
+    }
+    const confirmed = await askConfirm({
+      title: "Delete environment?",
+      message: "Variables in this environment will be permanently removed.",
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) {
       return;
     }
     await fetch(`/api/environments/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -2647,6 +3026,54 @@ simAiGenerateBtn.addEventListener("click", async () => {
   }
 });
 
+onboardingSkipBtn?.addEventListener("click", () => stopOnboarding(false));
+onboardingReplayBtn?.addEventListener("click", () => {
+  startOnboarding(true);
+});
+onboardingPrevBtn?.addEventListener("click", () => {
+  onboardingStepIndex = Math.max(0, onboardingStepIndex - 1);
+  renderOnboardingStep();
+});
+onboardingNextBtn?.addEventListener("click", () => {
+  if (onboardingStepIndex >= onboardingSteps.length - 1) {
+    stopOnboarding(true);
+    return;
+  }
+  onboardingStepIndex += 1;
+  renderOnboardingStep();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (onboardingActive) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      stopOnboarding(false);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      onboardingNextBtn?.click();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      onboardingPrevBtn?.click();
+      return;
+    }
+  }
+
+  if (!actionModalEl?.hidden && event.key === "Escape") {
+    event.preventDefault();
+    resolveActionModal(null);
+    return;
+  }
+
+  if (!actionModalEl?.hidden && event.key === "Enter" && !actionModalNeedsInput) {
+    event.preventDefault();
+    actionModalConfirmBtn?.click();
+  }
+});
+
 async function bootstrap() {
   try {
     await fetchFeatures();
@@ -2665,6 +3092,7 @@ async function bootstrap() {
   syncBuilderAuthUi();
   autoGrowChatInput();
   renderChatMessages();
+  setTimeout(startOnboardingIfNeeded, 280);
 }
 
 bootstrap();

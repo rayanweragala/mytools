@@ -21,7 +21,8 @@ Open `http://localhost:8787`.
 
 ## One-command worker setup (background)
 
-Use this when sharing internally so nobody has to remember install/run steps:
+Use this when sharing internally so nobody has to remember install/run steps.
+These worker commands are cross-platform (macOS, Linux, and Windows):
 
 ```bash
 npm run worker:up

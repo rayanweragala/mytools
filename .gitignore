@@ -14,3 +14,7 @@ data/
 # Local agent/runtime state
 .omx/
 .openclaude-profile.json
+
+.idea/
+.claude/
+.codex

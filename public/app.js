@@ -155,6 +155,7 @@ const fields = {
   defaultStatusCode: document.getElementById("defaultStatusCode"),
   statusCodes: document.getElementById("statusCodes"),
   responseDelayMs: document.getElementById("responseDelayMs"),
+  forwardUrl: document.getElementById("forwardUrl"),
   responseHeaders: document.getElementById("responseHeaders"),
   responseBody: document.getElementById("responseBody")
 };
@@ -169,6 +170,10 @@ let chaosState = { enabled: false, failureRate: 0 };
 let tunnelBusy = false;
 let tooltipTimer = null;
 let builderTooltipTimer = null;
+let statePollTimer = null;
+let stateEvents = null;
+let stateEventsReconnectTimer = null;
+let stateEventsUnsupported = false;
 
 let features = { aiEnabled: false, ngrokEnabled: false };
 
@@ -246,6 +251,70 @@ function enabledRowsToRecord(rows) {
     record[key] = String(row?.value ?? "");
   }
   return record;
+}
+
+function hasHeader(record, name) {
+  const target = String(name || "").trim().toLowerCase();
+  if (!target) {
+    return false;
+  }
+  return Object.keys(record || {}).some((key) => String(key || "").trim().toLowerCase() === target);
+}
+
+function shellQuote(value) {
+  const text = String(value ?? "");
+  return `'${text.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function mergeCurlUrlAndParams(urlValue, paramsRecord) {
+  const raw = String(urlValue || "").trim();
+  const entries = Object.entries(paramsRecord || {}).filter(([key]) => String(key || "").trim());
+  if (!entries.length) {
+    return raw;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    entries.forEach(([key, value]) => parsed.searchParams.set(key, String(value ?? "")));
+    return parsed.toString();
+  } catch (_error) {
+    const query = new URLSearchParams();
+    entries.forEach(([key, value]) => query.set(String(key), String(value ?? "")));
+    const suffix = query.toString();
+    if (!suffix) {
+      return raw;
+    }
+    return `${raw}${raw.includes("?") ? "&" : "?"}${suffix}`;
+  }
+}
+
+function buildCurlFromBuilderPayload(payload) {
+  const method = String(payload?.method || "GET").trim().toUpperCase() || "GET";
+  const headers = {
+    ...enabledRowsToRecord(payload?.headers),
+    ...authRowsToDebugHeaders(payload?.auth)
+  };
+  const params = enabledRowsToRecord(payload?.params);
+  const url = mergeCurlUrlAndParams(payload?.url, params);
+
+  let body = String(payload?.body ?? "");
+  if (payload?.bodyFormat === "form") {
+    body = new URLSearchParams(enabledRowsToRecord(payload?.formFields)).toString();
+    if (body && !hasHeader(headers, "content-type")) {
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+    }
+  } else if (body.trim() && payload?.bodyFormat === "json" && !hasHeader(headers, "content-type")) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const lines = [`curl -X ${method} ${shellQuote(url)}`];
+  Object.entries(headers).forEach(([key, value]) => {
+    lines.push(`-H ${shellQuote(`${key}: ${String(value ?? "")}`)}`);
+  });
+  if (body.trim()) {
+    lines.push(`-d ${shellQuote(body)}`);
+  }
+  return lines.join(" \\\n");
 }
 
 function recordToRows(record) {
@@ -497,6 +566,7 @@ function renderConfig(force = false) {
   fields.defaultStatusCode.value = String(cfg.defaultStatusCode);
   fields.statusCodes.value = (cfg.statusCodes || []).join(", ");
   fields.responseDelayMs.value = String(cfg.responseDelayMs);
+  fields.forwardUrl.value = cfg.forwardUrl || "";
   fields.responseHeaders.value = prettyJson(cfg.responseHeaders || {});
   fields.responseBody.value = cfg.responseBody || "";
 
@@ -716,6 +786,136 @@ async function fetchFeatures() {
   syncAiUi();
 }
 
+function applyLiveSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return;
+  }
+
+  if (snapshot.state && typeof snapshot.state === "object") {
+    appState = snapshot.state;
+    render();
+  }
+  if (snapshot.tunnel && typeof snapshot.tunnel === "object") {
+    tunnelState = {
+      active: Boolean(snapshot.tunnel.active),
+      url: typeof snapshot.tunnel.url === "string" && snapshot.tunnel.url ? snapshot.tunnel.url : null
+    };
+    renderTunnel();
+  }
+  if (snapshot.chaos && typeof snapshot.chaos === "object") {
+    chaosState = {
+      enabled: Boolean(snapshot.chaos.enabled),
+      failureRate: normalizeFailureRate(snapshot.chaos.failureRate)
+    };
+    renderChaos();
+  }
+}
+
+async function pollStateOnce() {
+  await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
+}
+
+function startPollingFallback() {
+  if (statePollTimer) {
+    return;
+  }
+  statePollTimer = setInterval(async () => {
+    try {
+      await pollStateOnce();
+    } catch (_error) {
+      // Keep polling; transient network/tunnel issues should self-heal.
+    }
+  }, 2000);
+}
+
+function stopPollingFallback() {
+  if (!statePollTimer) {
+    return;
+  }
+  clearInterval(statePollTimer);
+  statePollTimer = null;
+}
+
+function scheduleStateEventsReconnect() {
+  if (stateEventsUnsupported) {
+    return;
+  }
+  if (stateEventsReconnectTimer) {
+    return;
+  }
+  stateEventsReconnectTimer = setTimeout(() => {
+    stateEventsReconnectTimer = null;
+    connectStateEvents();
+  }, 3000);
+}
+
+async function probeStateEventsEndpoint() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1800);
+  try {
+    const response = await fetch("/api/events", {
+      method: "HEAD",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    return response.ok && contentType.includes("text/event-stream");
+  } catch (_error) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function connectStateEvents() {
+  if (typeof EventSource === "undefined") {
+    stateEventsUnsupported = true;
+    startPollingFallback();
+    return;
+  }
+  if (stateEvents) {
+    return;
+  }
+  if (stateEventsUnsupported) {
+    startPollingFallback();
+    return;
+  }
+
+  const supported = await probeStateEventsEndpoint();
+  if (!supported) {
+    stateEventsUnsupported = true;
+    startPollingFallback();
+    return;
+  }
+
+  const source = new EventSource("/api/events");
+  stateEvents = source;
+  stateEventsUnsupported = false;
+
+  source.onopen = () => {
+    stopPollingFallback();
+  };
+
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(String(event.data || "{}"));
+      applyLiveSnapshot(payload);
+      stopPollingFallback();
+    } catch (_error) {
+      // Keep stream alive; next valid event will recover.
+    }
+  };
+
+  source.onerror = () => {
+    if (stateEvents === source) {
+      stateEvents = null;
+    }
+    source.close();
+    startPollingFallback();
+    scheduleStateEventsReconnect();
+  };
+}
+
 function syncAiUi() {
   const disabled = !features.aiEnabled;
   bodyAiGenerateBtn.disabled = disabled;
@@ -756,19 +956,34 @@ async function updateChaosState(nextState) {
 
 async function copyText(value) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch (_error) {
+      // Fall through to the legacy copy path when clipboard permissions are denied.
+    }
   }
 
   const helper = document.createElement("textarea");
   helper.value = value;
   helper.setAttribute("readonly", "true");
-  helper.style.position = "absolute";
+  helper.style.position = "fixed";
+  helper.style.opacity = "0";
+  helper.style.pointerEvents = "none";
   helper.style.left = "-9999px";
   document.body.appendChild(helper);
+  helper.focus();
   helper.select();
-  document.execCommand("copy");
+  helper.setSelectionRange(0, helper.value.length);
+  const copied = document.execCommand("copy");
   document.body.removeChild(helper);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
+}
+
+function promptManualCopy(label, value) {
+  window.prompt(`Clipboard blocked. Copy ${label} manually (Ctrl/Cmd+C, then Enter).`, value);
 }
 
 function showCopyTooltip(text) {
@@ -783,6 +998,9 @@ function showCopyTooltip(text) {
 }
 
 function showBuilderCopyCurlTooltip(text, type = "success") {
+  if (!builderCopyCurlTooltipEl) {
+    return;
+  }
   builderCopyCurlTooltipEl.textContent = text;
   builderCopyCurlTooltipEl.classList.toggle("is-error", type === "error");
   if (builderTooltipTimer) {
@@ -1862,26 +2080,6 @@ function applyImportedCurlRequest(request) {
   });
 }
 
-async function runRequestToCurl(payload) {
-  const body = {
-    method: payload.method,
-    url: payload.url,
-    headers: enabledRowsToRecord(payload.headers),
-    body: payload.body,
-    params: enabledRowsToRecord(payload.params)
-  };
-  const res = await fetch("/api/ai/request-to-curl", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success || typeof data.curl !== "string") {
-    throw new Error(data.error || "Could not generate curl command");
-  }
-  return data.curl;
-}
-
 function savedRequestToAiRequest(savedRequest) {
   const headers = enabledRowsToRecord(savedRequest.headers || []);
   const params = enabledRowsToRecord(savedRequest.params || []);
@@ -1980,6 +2178,7 @@ configForm.addEventListener("submit", async (event) => {
     defaultStatusCode: Number(fields.defaultStatusCode.value),
     statusCodes: normalizeStatusCodes(fields.statusCodes.value),
     responseDelayMs: Number(fields.responseDelayMs.value),
+    forwardUrl: fields.forwardUrl.value,
     responseHeaders: parsedHeaders,
     responseBody: fields.responseBody.value
   };
@@ -2362,16 +2561,20 @@ builderCopyCurlBtn.addEventListener("click", async () => {
   const payload = collectBuilderPayload();
   if (!String(payload.url || "").trim()) {
     showBuilderCopyCurlTooltip("add a URL first", "error");
+    setSaveStatus("Add a URL first.", "error");
     return;
   }
 
   builderCopyCurlBtn.disabled = true;
+  const curl = buildCurlFromBuilderPayload(payload);
   try {
-    const curl = await runRequestToCurl(payload);
     await copyText(curl);
     showBuilderCopyCurlTooltip("copied");
+    setSaveStatus("cURL copied to clipboard.", "success");
   } catch (_error) {
-    showBuilderCopyCurlTooltip("copy failed", "error");
+    promptManualCopy("cURL", curl);
+    showBuilderCopyCurlTooltip("manual copy", "error");
+    setSaveStatus("Clipboard was blocked. cURL opened for manual copy.", "error");
   } finally {
     builderCopyCurlBtn.disabled = false;
   }
@@ -2904,8 +3107,13 @@ respCopyBtn.addEventListener("click", async () => {
   } catch (_e) {
     // keep
   }
-  await copyText(prettyBody);
-  setSaveStatus("Response body copied.", "success");
+  try {
+    await copyText(prettyBody);
+    setSaveStatus("Response body copied.", "success");
+  } catch (_error) {
+    promptManualCopy("response body", prettyBody);
+    setSaveStatus("Clipboard was blocked. Response body opened for manual copy.", "error");
+  }
 });
 
 document.querySelectorAll(".resp-subtab").forEach((btn) => {
@@ -3077,7 +3285,7 @@ document.addEventListener("keydown", (event) => {
 async function bootstrap() {
   try {
     await fetchFeatures();
-    await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
+    await pollStateOnce();
     setSaveStatus("", "info");
   } catch (_error) {
     setSaveStatus("Failed to load app state.", "error");
@@ -3096,10 +3304,4 @@ async function bootstrap() {
 }
 
 bootstrap();
-setInterval(async () => {
-  try {
-    await Promise.all([fetchState(), fetchTunnelStatus(), fetchChaosState()]);
-  } catch (_error) {
-    // Keep polling; transient network/tunnel issues should self-heal.
-  }
-}, 2000);
+void connectStateEvents();

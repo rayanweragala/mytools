@@ -11,6 +11,7 @@ const RUN_DIR = path.join(ROOT_DIR, ".run");
 const PID_FILE = path.join(RUN_DIR, "dev.pid");
 const LOG_FILE = path.join(RUN_DIR, "dev.log");
 const NPM_STAMP_FILE = path.join(RUN_DIR, "npm-install.stamp");
+const DEV_BASE_URL = process.env.DEV_BASE_URL || "http://localhost:8787";
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function usage() {
@@ -108,11 +109,55 @@ function waitMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchWithTimeout(url, timeoutMs = 1500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probeHealth() {
+  try {
+    const response = await fetchWithTimeout(`${DEV_BASE_URL}/health`, 1500);
+    return response.ok;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function probeEventsRoute() {
+  try {
+    const response = await fetchWithTimeout(`${DEV_BASE_URL}/api/events`, 1500);
+    const contentType = response.headers.get("content-type") || "";
+    return response.status === 200 && contentType.toLowerCase().includes("text/event-stream");
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function waitForHealthyServer(maxAttempts = 12, delayMs = 500) {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    if (await probeHealth()) {
+      return true;
+    }
+    await waitMs(delayMs);
+  }
+  return false;
+}
+
 async function startServer() {
   checkNpmAvailable();
 
   if (isRunning()) {
     console.log(`Dev server is already running (PID ${readPid()}).`);
+    const hasEvents = await probeEventsRoute();
+    if (!hasEvents) {
+      console.log("Warning: running server does not expose /api/events.");
+      console.log("Run `npm run worker:restart` to load the latest code.");
+    }
     console.log(`Logs: ${LOG_FILE}`);
     return;
   }
@@ -135,13 +180,26 @@ async function startServer() {
   fs.closeSync(logFd);
   fs.writeFileSync(PID_FILE, `${child.pid}\n`, "utf8");
 
-  await waitMs(1000);
+  await waitMs(800);
 
-  if (isRunningPid(child.pid)) {
+  const childAlive = isRunningPid(child.pid);
+  const healthy = await waitForHealthyServer();
+  if (childAlive && healthy) {
+    const hasEvents = await probeEventsRoute();
     console.log(`Dev server started (PID ${child.pid}).`);
     console.log("Open: http://localhost:8787");
+    if (!hasEvents) {
+      console.log("Warning: /api/events is unavailable (expected 200 text/event-stream).");
+      console.log("If this persists, run `npm run worker:restart`.");
+    }
     console.log(`Logs: ${LOG_FILE}`);
     return;
+  }
+
+  try {
+    fs.unlinkSync(PID_FILE);
+  } catch (_error) {
+    // ignore
   }
 
   console.error("Failed to start dev server. Recent logs:");

@@ -725,9 +725,68 @@ app.use("/api", express.urlencoded({ extended: true, limit: "2mb", verify: captu
 app.use("/webhook/:endpoint", express.text({ type: () => true, limit: "2mb", verify: captureRawBody }));
 app.use(express.static(path.resolve(__dirname, "../public")));
 
+const sseClients = new Set<Response>();
+let lastSseSnapshot = "";
+
+function buildSseSnapshot() {
+  return {
+    state: store.getState(),
+    tunnel: { active: Boolean(tunnelUrl), url: tunnelUrl },
+    chaos: store.getChaos()
+  };
+}
+
+function writeSseData(res: Response, payload: unknown): void {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function broadcastSseSnapshot(force = false): void {
+  if (sseClients.size === 0) {
+    return;
+  }
+  const snapshot = buildSseSnapshot();
+  const encoded = JSON.stringify(snapshot);
+  if (!force && encoded === lastSseSnapshot) {
+    return;
+  }
+  lastSseSnapshot = encoded;
+  for (const client of sseClients) {
+    client.write(`data: ${encoded}\n\n`);
+  }
+}
+
+setInterval(() => {
+  broadcastSseSnapshot();
+}, 1000);
+
+setInterval(() => {
+  if (sseClients.size === 0) {
+    return;
+  }
+  for (const client of sseClients) {
+    client.write(": keep-alive\n\n");
+  }
+}, 25000);
+
 app.get("/health", (_req, res) => {
   const { endpointKeys } = store.getState();
   res.json({ status: "up", port: PORT, endpoints: endpointKeys });
+});
+
+app.get("/api/events", (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  res.write("retry: 3000\n\n");
+  writeSseData(res, buildSseSnapshot());
+  sseClients.add(res);
+
+  req.on("close", () => {
+    sseClients.delete(res);
+  });
 });
 
 app.get("/api/state", (_req, res) => {

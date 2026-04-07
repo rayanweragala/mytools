@@ -598,17 +598,8 @@ textarea:focus {
   box-shadow: rgba(0, 0, 0, 0.15) 0 2px 10px inset;
 }
 
-.auth-group {
-  transition: opacity 180ms ease, transform 180ms ease;
-}
-
 .auth-group.is-hidden {
-  opacity: 0.25;
-  transform: translateY(-2px);
-}
-
-.auth-group.is-hidden input {
-  pointer-events: none;
+  display: none;
 }
 
 .save-row {

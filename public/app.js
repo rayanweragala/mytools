@@ -737,7 +737,7 @@ function markCurrentEndpointDirty() {
 }
 
 async function fetchState() {
-  const response = await fetch("/api/state");
+  const response = await fetch("/api/state", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch state (${response.status})`);
   }
@@ -750,7 +750,7 @@ async function fetchState() {
 }
 
 async function fetchTunnelStatus() {
-  const response = await fetch("/api/tunnel/status");
+  const response = await fetch("/api/tunnel/status", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch tunnel status (${response.status})`);
   }
@@ -760,7 +760,7 @@ async function fetchTunnelStatus() {
 }
 
 async function fetchChaosState() {
-  const response = await fetch("/api/chaos");
+  const response = await fetch("/api/chaos", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch chaos config (${response.status})`);
   }
@@ -775,7 +775,7 @@ async function fetchChaosState() {
 
 async function fetchFeatures() {
   try {
-    const res = await fetch("/api/config/features");
+    const res = await fetch("/api/config/features", { cache: "no-store" });
     if (!res.ok) {
       return;
     }
@@ -2193,7 +2193,16 @@ configForm.addEventListener("submit", async (event) => {
     });
 
     if (!response.ok) {
-      throw new Error(`Save failed (${response.status})`);
+      let message = `Save failed (${response.status})`;
+      try {
+        const errorData = await response.json();
+        if (typeof errorData?.error === "string" && errorData.error.trim()) {
+          message = errorData.error;
+        }
+      } catch (_error) {
+        // Keep fallback status message.
+      }
+      throw new Error(message);
     }
 
     dirtyEndpoints.delete(selectedEndpoint);

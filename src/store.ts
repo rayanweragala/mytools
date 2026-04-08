@@ -27,6 +27,67 @@ const defaultEndpointConfig: EndpointConfig = {
   forwardUrl: ""
 };
 
+const HTTP_STATUS_MIN = 100;
+const HTTP_STATUS_MAX = 599;
+
+function isValidHttpStatusCode(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= HTTP_STATUS_MIN && value <= HTTP_STATUS_MAX
+  );
+}
+
+function sanitizeResponseHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...defaultEndpointConfig.responseHeaders };
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key || typeof rawValue !== "string") {
+      continue;
+    }
+    normalized[key] = rawValue;
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    return { ...defaultEndpointConfig.responseHeaders };
+  }
+  return normalized;
+}
+
+function sanitizeEndpointConfigFields(config: EndpointConfig): EndpointConfig {
+  return {
+    ...config,
+    defaultStatusCode: isValidHttpStatusCode(config.defaultStatusCode)
+      ? config.defaultStatusCode
+      : defaultEndpointConfig.defaultStatusCode,
+    statusCodes: Array.isArray(config.statusCodes) ? config.statusCodes.filter((code): code is number => isValidHttpStatusCode(code)) : [],
+    responseHeaders: sanitizeResponseHeaders(config.responseHeaders)
+  };
+}
+
+function endpointDefaultConfig(key: EndpointKey): EndpointConfig {
+  return {
+    ...defaultEndpointConfig,
+    responseBody: JSON.stringify({ accepted: true, event: key }, null, 2)
+  };
+}
+
+function withSanitizedEndpointConfig(key: EndpointKey, existing?: EndpointConfig): EndpointConfig {
+  if (!existing) {
+    return endpointDefaultConfig(key);
+  }
+  return sanitizeEndpointConfigFields({
+    ...endpointDefaultConfig(key),
+    ...existing
+  });
+}
+
+function hasOwnProperty(target: unknown, key: string): boolean {
+  return Boolean(target) && Object.prototype.hasOwnProperty.call(target, key);
+}
+
 class Store {
   private state: AppState;
   private logIdCounter = 1;
@@ -66,19 +127,7 @@ class Store {
 
   private ensureDefaultConfigs() {
     this.state.endpointKeys.forEach((key) => {
-      const existing = this.state.configs[key];
-      if (!this.state.configs[key]) {
-        this.state.configs[key] = {
-          ...defaultEndpointConfig,
-          responseBody: JSON.stringify({ accepted: true, event: key }, null, 2)
-        };
-        return;
-      }
-
-      this.state.configs[key] = {
-        ...defaultEndpointConfig,
-        ...existing
-      };
+      this.state.configs[key] = withSanitizedEndpointConfig(key, this.state.configs[key]);
     });
   }
 
@@ -103,10 +152,12 @@ class Store {
 
   updateConfig(endpoint: EndpointKey, cfg: Partial<EndpointConfig>) {
     if (this.state.configs[endpoint]) {
-      this.state.configs[endpoint] = { ...this.state.configs[endpoint], ...cfg };
+      this.state.configs[endpoint] = sanitizeEndpointConfigFields({
+        ...this.state.configs[endpoint],
+        ...cfg
+      });
       this.saveState();
-      // Reset sequence index if statusCodes changed
-      if (cfg.statusCodes) {
+      if (hasOwnProperty(cfg, "statusCodes")) {
         this.statusIndices[endpoint] = 0;
       }
     }

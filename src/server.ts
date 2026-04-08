@@ -67,6 +67,8 @@ function loadEnvFile(filePath: string): void {
 loadEnvFile(ENV_PATH);
 
 const PORT = Number(process.env.PORT || 8787);
+const HTTP_STATUS_MIN = 100;
+const HTTP_STATUS_MAX = 599;
 
 const builderSendLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -336,6 +338,77 @@ function normalizeEndpointKey(value: string): EndpointKey | null {
   return null;
 }
 
+function isValidHttpStatusCode(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= HTTP_STATUS_MIN && value <= HTTP_STATUS_MAX
+  );
+}
+
+function normalizeResponseHeaders(
+  value: unknown
+): { ok: true; value: Record<string, string> } | { ok: false; error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "responseHeaders must be an object of string:string pairs" };
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key) {
+      return { ok: false, error: "responseHeaders cannot contain an empty header name" };
+    }
+    if (typeof rawValue !== "string") {
+      return { ok: false, error: "responseHeaders values must be strings" };
+    }
+    normalized[key] = rawValue;
+  }
+
+  return { ok: true, value: normalized };
+}
+
+function validateConfigUpdate(
+  update: Partial<EndpointConfig>
+): { ok: true; value: Partial<EndpointConfig> } | { ok: false; error: string } {
+  const hasOwn = Object.prototype.hasOwnProperty;
+  const value = { ...update };
+  const updateRecord = update as {
+    defaultStatusCode?: unknown;
+    statusCodes?: unknown;
+    responseHeaders?: unknown;
+  };
+
+  if (hasOwn.call(updateRecord, "defaultStatusCode")) {
+    if (!isValidHttpStatusCode(updateRecord.defaultStatusCode)) {
+      return { ok: false, error: "defaultStatusCode must be an integer between 100 and 599" };
+    }
+    value.defaultStatusCode = updateRecord.defaultStatusCode;
+  }
+
+  if (hasOwn.call(updateRecord, "statusCodes")) {
+    if (!Array.isArray(updateRecord.statusCodes)) {
+      return { ok: false, error: "statusCodes must be an array of integers between 100 and 599" };
+    }
+    const normalizedStatusCodes: number[] = [];
+    for (const statusCode of updateRecord.statusCodes) {
+      if (!isValidHttpStatusCode(statusCode)) {
+        return { ok: false, error: "statusCodes must be an array of integers between 100 and 599" };
+      }
+      normalizedStatusCodes.push(statusCode);
+    }
+    value.statusCodes = normalizedStatusCodes;
+  }
+
+  if (hasOwn.call(updateRecord, "responseHeaders")) {
+    const normalizedHeaders = normalizeResponseHeaders(updateRecord.responseHeaders);
+    if (!normalizedHeaders.ok) {
+      return normalizedHeaders;
+    }
+    value.responseHeaders = normalizedHeaders.value;
+  }
+
+  return { ok: true, value };
+}
+
 function validateAuth(req: Request, cfg: EndpointConfig): boolean {
   if (cfg.authType === "NONE") {
     return true;
@@ -502,9 +575,11 @@ async function forwardWebhookRequest(
       body: canIncludeBody(method) ? rawBody : undefined
     });
     store.updateLogForwardResult(logId, response.status, null);
+    pushRealtimeSnapshot();
   } catch (error) {
     const message = error instanceof Error ? error.message : "forward request failed";
     store.updateLogForwardResult(logId, null, message);
+    pushRealtimeSnapshot();
   }
 }
 
@@ -755,6 +830,10 @@ function broadcastSseSnapshot(force = false): void {
   }
 }
 
+function pushRealtimeSnapshot(): void {
+  broadcastSseSnapshot(true);
+}
+
 setInterval(() => {
   broadcastSseSnapshot();
 }, 1000);
@@ -789,7 +868,16 @@ app.get("/api/events", (req: Request, res: Response) => {
   });
 });
 
+app.head("/api/events", (_req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.status(200).end();
+});
+
 app.get("/api/state", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   res.json(store.getState());
 });
 
@@ -1309,7 +1397,13 @@ app.put("/api/config/:endpoint", (req: Request, res: Response) => {
   }
 
   const update = req.body as Partial<EndpointConfig>;
-  store.updateConfig(endpoint, update);
+  const validated = validateConfigUpdate(update);
+  if (!validated.ok) {
+    res.status(400).json({ error: validated.error });
+    return;
+  }
+
+  store.updateConfig(endpoint, validated.value);
   res.json({ success: true, config: store.getState().configs[endpoint] });
 });
 
@@ -1376,6 +1470,7 @@ app.post("/api/chaos", (req: Request, res: Response) => {
 
 app.post("/api/logs/clear", (_req, res) => {
   store.clearLogs();
+  pushRealtimeSnapshot();
   res.json({ success: true });
 });
 
@@ -1566,6 +1661,7 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       },
       durationMs: Date.now() - t0
     });
+    pushRealtimeSnapshot();
     maybeForward(logId);
 
     res.status(503).json({
@@ -1595,6 +1691,7 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
       responseBody: { status: "unauthorized", endpoint },
       durationMs: Date.now() - t0
     });
+    pushRealtimeSnapshot();
     maybeForward(logId);
 
     res.status(401).json({ status: "unauthorized", endpoint });
@@ -1629,6 +1726,7 @@ app.post("/webhook/:endpoint", async (req: Request, res: Response) => {
     responseBody: responsePayload,
     durationMs: Date.now() - t0
   });
+  pushRealtimeSnapshot();
   maybeForward(logId);
 
   if (cfg.responseHeaders) {

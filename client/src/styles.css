@@ -488,6 +488,221 @@ a {
   background: color-mix(in srgb, var(--accent-muted) 22%, transparent);
 }
 
+.simulator-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 36%);
+  gap: 14px;
+  align-items: start;
+}
+
+.simulator-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.simulator-head-row h1 {
+  margin: 0;
+}
+
+.filter-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.endpoint-chip-row {
+  max-height: 96px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.chip-btn {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 75%, black);
+  color: var(--text-main);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chip-btn.is-active {
+  border-color: var(--accent-primary);
+  color: var(--accent-lime);
+}
+
+.sim-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sim-filter-row label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+.sim-filter-row select,
+.sim-filter-row input {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 78%, black);
+  color: var(--text-main);
+  padding: 7px 8px;
+  min-width: 130px;
+}
+
+.sim-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.virtual-list {
+  margin-top: 12px;
+  height: 62vh;
+  min-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 72%, black);
+}
+
+.sim-log-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.sim-log-row:hover {
+  background: color-mix(in srgb, var(--accent-muted) 20%, transparent);
+}
+
+.sim-log-row-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-log-row-left code {
+  font-family: "Monaco", Menlo, monospace;
+  color: var(--accent-lime);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-log-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.status-pill,
+.source-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.status-2xx {
+  color: #b8f464;
+}
+
+.status-3xx {
+  color: #99c7ff;
+}
+
+.status-4xx {
+  color: #ffcb71;
+}
+
+.status-5xx {
+  color: #ff8b9f;
+}
+
+.sim-drawer {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+}
+
+.sim-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sim-drawer-head h1 {
+  margin: 0;
+}
+
+.sim-detail-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.sim-detail-block h2 {
+  margin: 0;
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.sim-detail-block p {
+  margin: 0;
+}
+
+.sim-detail-block pre {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--surface) 68%, black);
+  color: var(--text-main);
+  font-family: "Monaco", Menlo, monospace;
+  font-size: 0.76rem;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -504,5 +719,14 @@ a {
 
   .builder-request-line {
     grid-template-columns: 1fr;
+  }
+
+  .simulator-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-drawer {
+    position: static;
+    max-height: none;
   }
 }

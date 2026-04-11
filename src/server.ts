@@ -1050,6 +1050,12 @@ app.post("/api/endpoints/import", (req: Request, res: Response) => {
   res.status(201).json({ success: true, key: result.key, webhookUrl: `/webhook/${result.key}` });
 });
 
+app.post("/api/endpoints/reset-defaults", (_req: Request, res: Response) => {
+  store.resetEndpointsToDefaults();
+  pushRealtimeSnapshot();
+  res.json({ success: true, endpointKeys: store.getState().endpointKeys });
+});
+
 app.get("/api/builder/history", (_req, res) => {
   res.json({ history: builderHistory });
 });

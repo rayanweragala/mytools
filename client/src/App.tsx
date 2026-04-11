@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { AppShell } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
 import { Simulator } from "./pages/Simulator";
@@ -15,6 +16,31 @@ import { Docs } from "./pages/Docs";
 const queryClient = new QueryClient();
 
 export function App() {
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("mytools_appearance");
+      if (!raw) return;
+      const appearance = JSON.parse(raw) as {
+        theme?: "dark" | "light" | "system";
+        accent?: string;
+        compact?: boolean;
+        fontSize?: "normal" | "large";
+      };
+      if (appearance.theme) {
+        document.documentElement.dataset.theme = appearance.theme;
+      }
+      if (appearance.fontSize) {
+        document.documentElement.dataset.fontSize = appearance.fontSize;
+      }
+      document.documentElement.dataset.compact = appearance.compact ? "1" : "0";
+      if (appearance.accent) {
+        document.documentElement.style.setProperty("--accent-primary", appearance.accent);
+      }
+    } catch {
+      // Ignore malformed persisted appearance settings.
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

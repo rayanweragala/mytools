@@ -252,6 +252,20 @@ class Store {
     return result;
   }
 
+  resetEndpointsToDefaults(): { ok: true } {
+    const defaults = [...defaultEndpointKeys];
+    const nextConfigs: Record<EndpointKey, EndpointConfig> = {} as Record<EndpointKey, EndpointConfig>;
+    defaults.forEach((key) => {
+      nextConfigs[key] = withSanitizedEndpointConfig(key, this.state.configs[key]);
+    });
+    this.state.endpointKeys = defaults;
+    this.state.configs = nextConfigs;
+    this.state.logs = this.state.logs.filter((entry) => defaults.includes(entry.endpoint));
+    this.statusIndices = {};
+    this.saveState();
+    return { ok: true };
+  }
+
   updateConfig(endpoint: EndpointKey, cfg: Partial<EndpointConfig>) {
     if (this.state.configs[endpoint]) {
       this.state.configs[endpoint] = sanitizeEndpointConfigFields({

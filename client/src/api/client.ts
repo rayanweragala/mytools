@@ -7,13 +7,30 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: "PUT", body: JSON.stringify(body) });
+}
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  return apiRequest<T>(path, { method: "DELETE" });
+}
+
+async function apiRequest<T>(path: string, init: RequestInit): Promise<T> {
+  const method = String(init.method || "GET").toUpperCase();
   const res = await fetch(path, {
-    method: "POST",
+    ...init,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+    ...(init.headers || {})
   });
   if (!res.ok) {
-    throw new Error(`POST ${path} failed (${res.status})`);
+    throw new Error(`${method} ${path} failed (${res.status})`);
   }
   return (await res.json()) as T;
 }

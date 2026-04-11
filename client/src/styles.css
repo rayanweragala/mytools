@@ -156,6 +156,116 @@ a {
   cursor: pointer;
 }
 
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(8, 6, 13, 0.62);
+  display: grid;
+  place-items: start center;
+  padding: 8vh 16px 16px;
+}
+
+.palette-modal {
+  width: min(760px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 90%, black);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.palette-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-main);
+  font-size: 1rem;
+  padding: 14px 16px;
+  outline: none;
+  font-family: "Rubik", system-ui, sans-serif;
+}
+
+.palette-results {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+.palette-item {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 11px 16px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+
+.palette-item:hover {
+  background: color-mix(in srgb, var(--accent-muted) 22%, transparent);
+}
+
+.palette-label {
+  font-weight: 600;
+}
+
+.palette-subtitle {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-family: "Monaco", Menlo, monospace;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--text-dim);
+}
+
+.shortcuts-modal {
+  width: min(620px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 90%, black);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcuts-head h2 {
+  margin: 0;
+}
+
+.shortcuts-list {
+  display: grid;
+  gap: 6px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.shortcut-row code {
+  color: var(--accent-lime);
+  font-family: "Monaco", Menlo, monospace;
+}
+
 .simple-list {
   margin: 0;
   padding-left: 18px;

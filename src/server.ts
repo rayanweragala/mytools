@@ -881,6 +881,57 @@ app.get("/api/state", (_req, res) => {
   res.json(store.getState());
 });
 
+app.get("/api/stats", (_req, res) => {
+  const logs = store.getState().logs;
+  const now = Date.now();
+  const oneHourAgo = now - 60 * 60 * 1000;
+
+  const recent = logs.filter((entry) => new Date(entry.timestamp).getTime() > oneHourAgo);
+  const successful = recent.filter((entry) => entry.returnedStatusCode < 400);
+
+  const byMinute: Record<string, { total: number; success: number; error: number }> = {};
+  recent.forEach((entry) => {
+    const minute = new Date(entry.timestamp).toISOString().slice(0, 16);
+    if (!byMinute[minute]) {
+      byMinute[minute] = { total: 0, success: 0, error: 0 };
+    }
+    byMinute[minute].total += 1;
+    if (entry.returnedStatusCode < 400) {
+      byMinute[minute].success += 1;
+    } else {
+      byMinute[minute].error += 1;
+    }
+  });
+
+  const byEndpoint: Record<string, { total: number; success: number; avgLatency: number }> = {};
+  logs.forEach((entry) => {
+    if (!byEndpoint[entry.endpoint]) {
+      byEndpoint[entry.endpoint] = { total: 0, success: 0, avgLatency: 0 };
+    }
+    byEndpoint[entry.endpoint].total += 1;
+    if (entry.returnedStatusCode < 400) {
+      byEndpoint[entry.endpoint].success += 1;
+    }
+    byEndpoint[entry.endpoint].avgLatency += entry.durationMs ?? 0;
+  });
+
+  Object.values(byEndpoint).forEach((endpoint) => {
+    endpoint.avgLatency = endpoint.total ? endpoint.avgLatency / endpoint.total : 0;
+  });
+
+  res.json({
+    total: logs.length,
+    recentTotal: recent.length,
+    successRate: recent.length ? (successful.length / recent.length) * 100 : 100,
+    avgLatency: recent.length
+      ? recent.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0) / recent.length
+      : 0,
+    byMinute,
+    byEndpoint,
+    endpointCount: store.getState().endpointKeys.length
+  });
+});
+
 app.get("/api/config/features", (_req, res) => {
   const ai = getAiFeatures();
   res.json({

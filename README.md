@@ -17,7 +17,15 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:8787`.
+Open the React client at `http://localhost:5173` (API remains on `http://localhost:8787`).
+
+## Scripts
+
+`npm run dev` - starts API + Vite client concurrently  
+`npm run dev:api` - API only  
+`npm run dev:client` - React client only  
+`npm run build` - builds client (`dist/public`) and API (`dist/server.js`)  
+`npm start` - starts compiled API server
 
 ## One-command worker setup (background)
 

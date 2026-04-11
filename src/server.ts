@@ -891,6 +891,114 @@ app.get("/api/config/features", (_req, res) => {
   });
 });
 
+app.get("/api/endpoints", (_req, res) => {
+  const { endpointKeys, configs } = store.getState();
+  res.json({
+    endpoints: endpointKeys.map((key) => ({
+      key,
+      config: configs[key],
+      webhookUrl: `/webhook/${key}`
+    }))
+  });
+});
+
+app.post("/api/endpoints", (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name : "";
+  if (!name.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const result = store.addEndpoint(name);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  pushRealtimeSnapshot();
+  res.status(201).json({ success: true, key: result.key, webhookUrl: `/webhook/${result.key}` });
+});
+
+app.patch("/api/endpoints/:key/rename", (req: Request, res: Response) => {
+  const newName = typeof req.body?.name === "string" ? req.body.name : "";
+  if (!newName.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const result = store.renameEndpoint(req.params.key, newName);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  pushRealtimeSnapshot();
+  res.json({ success: true, key: result.key });
+});
+
+app.delete("/api/endpoints/:key", (req: Request, res: Response) => {
+  const result = store.deleteEndpoint(req.params.key);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  pushRealtimeSnapshot();
+  res.json({ success: true });
+});
+
+app.post("/api/endpoints/:key/duplicate", (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name : `${req.params.key}-copy`;
+  const result = store.duplicateEndpoint(req.params.key, name);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  pushRealtimeSnapshot();
+  res.status(201).json({ success: true, key: result.key, webhookUrl: `/webhook/${result.key}` });
+});
+
+app.get("/api/endpoints/:key/export", (req: Request, res: Response) => {
+  const endpoint = normalizeEndpointKey(req.params.key);
+  if (!endpoint) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+
+  const cfg = store.getState().configs[endpoint];
+  if (!cfg) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+
+  res.setHeader("Content-Disposition", `attachment; filename="${endpoint}-config.json"`);
+  res.json({
+    key: endpoint,
+    config: cfg,
+    exportedAt: new Date().toISOString()
+  });
+});
+
+app.post("/api/endpoints/import", (req: Request, res: Response) => {
+  const key = typeof req.body?.key === "string" ? req.body.key : "";
+  const config = req.body?.config;
+  if (!key.trim() || !config || typeof config !== "object" || Array.isArray(config)) {
+    res.status(400).json({ error: "key and config are required" });
+    return;
+  }
+
+  const result = store.addEndpoint(key);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  store.updateConfig(result.key as EndpointKey, config as Partial<EndpointConfig>);
+  pushRealtimeSnapshot();
+  res.status(201).json({ success: true, key: result.key, webhookUrl: `/webhook/${result.key}` });
+});
+
 app.get("/api/builder/history", (_req, res) => {
   res.json({ history: builderHistory });
 });

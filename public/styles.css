@@ -459,6 +459,129 @@ body {
   flex-direction: column;
 }
 
+.endpoint-manager {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+  background: rgba(34, 26, 58, 0.45);
+}
+
+.endpoint-manager-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.endpoint-manager-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.endpoint-manager-subtitle {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.endpoint-manager-list {
+  display: grid;
+  gap: 8px;
+}
+
+.endpoint-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(36, 27, 62, 0.35);
+  padding: 8px;
+}
+
+.endpoint-row.is-active {
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-inset);
+}
+
+.endpoint-row-main {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(110px, max-content) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.endpoint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-dim);
+}
+
+.endpoint-row.is-active .endpoint-dot {
+  background: var(--accent-lime);
+}
+
+.endpoint-row-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.endpoint-row-url {
+  font-family: "Monaco", Menlo, "Ubuntu Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--accent-lime);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-row-auth {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 8px;
+}
+
+.endpoint-row-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.endpoint-menu-trigger {
+  min-width: 34px;
+  padding-inline: 8px;
+  border-radius: var(--radius-sm);
+}
+
+.endpoint-menu {
+  display: none;
+  right: 0;
+  top: calc(100% + 4px);
+}
+
+.endpoint-row-actions.is-open .endpoint-menu {
+  display: grid;
+}
+
 .endpoint-tabs {
   display: flex;
   gap: 8px;
@@ -1090,6 +1213,33 @@ textarea:focus {
 
   .profiles-actions {
     grid-template-columns: 1fr;
+  }
+
+  .endpoint-row-main {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "dot name"
+      ". url"
+      ". auth";
+    align-items: start;
+  }
+
+  .endpoint-dot {
+    grid-area: dot;
+    margin-top: 6px;
+  }
+
+  .endpoint-row-name {
+    grid-area: name;
+  }
+
+  .endpoint-row-url {
+    grid-area: url;
+  }
+
+  .endpoint-row-auth {
+    grid-area: auth;
+    justify-self: start;
   }
 
   .profile-item {
@@ -2695,7 +2845,7 @@ textarea:focus {
   border-radius: var(--radius-md);
   background: rgba(21, 15, 35, 0.98);
   box-shadow: var(--shadow-card);
-  display: grid;
+  display: none;
   min-width: 140px;
   padding: 6px;
 }

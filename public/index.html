@@ -46,6 +46,21 @@
             <button id="resetBtn" class="btn btn-glass" type="button">Reset</button>
           </div>
 
+          <section class="endpoint-manager" id="endpointManager">
+            <div class="endpoint-manager-head">
+              <div>
+                <p class="label-micro">Endpoints</p>
+                <p class="endpoint-manager-subtitle">Create and manage webhook routes</p>
+              </div>
+              <div class="endpoint-manager-head-actions">
+                <button id="importEndpointBtn" class="btn btn-glass btn-tiny" type="button">Import</button>
+                <input id="importEndpointFile" type="file" accept="application/json" class="visually-hidden" />
+                <button id="newEndpointBtn" class="btn btn-glass btn-tiny" type="button">+ New</button>
+              </div>
+            </div>
+            <div id="endpointManagerList" class="endpoint-manager-list"></div>
+          </section>
+
           <div class="endpoint-tabs" id="endpointTabs" role="tablist" aria-label="Endpoints"></div>
 
           <div class="webhook-url-wrap">

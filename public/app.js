@@ -1,4 +1,8 @@
 const endpointTabsEl = document.getElementById("endpointTabs");
+const endpointManagerListEl = document.getElementById("endpointManagerList");
+const newEndpointBtn = document.getElementById("newEndpointBtn");
+const importEndpointBtn = document.getElementById("importEndpointBtn");
+const importEndpointFileEl = document.getElementById("importEndpointFile");
 const configForm = document.getElementById("configForm");
 const logsEl = document.getElementById("logs");
 const logCountEl = document.getElementById("logCount");
@@ -162,6 +166,8 @@ const fields = {
 
 const MAIN_TAB_KEY = "mytools_active_tab";
 const defaultRow = () => ({ key: "", value: "", enabled: true });
+const ENDPOINT_MAX_LENGTH = 64;
+const RESERVED_ENDPOINT_NAMES = new Set(["health", "api"]);
 
 let appState = null;
 let selectedEndpoint = "incoming-call";
@@ -213,6 +219,7 @@ let envVarDraft = [];
 let envPromptResolver = null;
 let actionModalResolver = null;
 let actionModalNeedsInput = false;
+let openEndpointMenuKey = null;
 
 let syncingParamsFromUrl = false;
 let chatOpen = false;
@@ -489,6 +496,33 @@ function normalizeStatusCodes(rawValue) {
     .filter((value) => !Number.isNaN(value));
 }
 
+function normalizeEndpointName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "-");
+}
+
+function validateEndpointName(rawName, existingKeys = [], options = {}) {
+  const normalized = normalizeEndpointName(rawName);
+  const skipKey = typeof options.skipKey === "string" ? options.skipKey : "";
+  if (!normalized) {
+    return { ok: false, error: "Endpoint name is required.", normalized };
+  }
+  if (normalized.length > ENDPOINT_MAX_LENGTH) {
+    return { ok: false, error: `Endpoint name must be ${ENDPOINT_MAX_LENGTH} characters or fewer.`, normalized };
+  }
+  if (RESERVED_ENDPOINT_NAMES.has(normalized)) {
+    return { ok: false, error: `"${normalized}" is reserved.`, normalized };
+  }
+  const duplicate = existingKeys.some((key) => key !== skipKey && key === normalized);
+  if (duplicate) {
+    return { ok: false, error: `Endpoint "${normalized}" already exists.`, normalized };
+  }
+  return { ok: true, normalized };
+}
+
 function normalizeFailureRate(rawValue) {
   const numeric = Number(rawValue);
   if (!Number.isFinite(numeric)) {
@@ -543,6 +577,40 @@ function renderEndpointTabs() {
           ${escapeHtml(endpointKey)}
           ${dirtyDot}
         </button>`;
+    })
+    .join("");
+}
+
+function renderEndpointManager() {
+  if (!appState || !endpointManagerListEl) {
+    return;
+  }
+
+  endpointManagerListEl.innerHTML = (appState.endpointKeys || [])
+    .map((endpointKey) => {
+      const active = endpointKey === selectedEndpoint;
+      const cfg = appState.configs?.[endpointKey] || {};
+      const authType = cfg.authType || "NONE";
+      const menuOpen = openEndpointMenuKey === endpointKey;
+      return `
+        <article class="endpoint-row ${active ? "is-active" : ""}" data-endpoint="${escapeHtml(endpointKey)}">
+          <button type="button" class="endpoint-row-main endpoint-select-btn" data-action="select-endpoint" data-endpoint="${escapeHtml(endpointKey)}">
+            <span class="endpoint-dot" aria-hidden="true"></span>
+            <span class="endpoint-row-name">${escapeHtml(endpointKey)}</span>
+            <code class="endpoint-row-url">/webhook/${escapeHtml(endpointKey)}</code>
+            <span class="endpoint-row-auth">${escapeHtml(authType)}</span>
+          </button>
+          <div class="endpoint-row-actions ${menuOpen ? "is-open" : ""}">
+            <button type="button" class="btn btn-glass btn-tiny endpoint-menu-trigger" data-action="toggle-endpoint-menu" data-endpoint="${escapeHtml(endpointKey)}" aria-label="Endpoint actions" aria-expanded="${menuOpen ? "true" : "false"}">⋯</button>
+            <div class="menu-popover endpoint-menu">
+              <button type="button" class="menu-btn" data-action="rename-endpoint" data-endpoint="${escapeHtml(endpointKey)}">Rename</button>
+              <button type="button" class="menu-btn" data-action="duplicate-endpoint" data-endpoint="${escapeHtml(endpointKey)}">Duplicate</button>
+              <button type="button" class="menu-btn" data-action="copy-endpoint-url" data-endpoint="${escapeHtml(endpointKey)}">Copy webhook URL</button>
+              <button type="button" class="menu-btn" data-action="export-endpoint" data-endpoint="${escapeHtml(endpointKey)}">Export config</button>
+              <button type="button" class="menu-btn" data-action="delete-endpoint" data-endpoint="${escapeHtml(endpointKey)}">Delete</button>
+            </div>
+          </div>
+        </article>`;
     })
     .join("");
 }
@@ -722,6 +790,7 @@ function renderProfiles() {
 
 function render() {
   if (!appState) return;
+  renderEndpointManager();
   renderEndpointTabs();
   renderConfig();
   renderProfiles();
@@ -952,6 +1021,53 @@ async function updateChaosState(nextState) {
     failureRate: normalizeFailureRate(saved.failureRate)
   };
   renderChaos();
+}
+
+async function parseErrorResponse(response, fallback) {
+  try {
+    const data = await response.json();
+    if (typeof data?.error === "string" && data.error.trim()) {
+      return data.error;
+    }
+  } catch (_error) {
+    // Keep fallback when response is not JSON.
+  }
+  return fallback;
+}
+
+async function callEndpointApi(url, options = {}, fallbackMessage = "Endpoint request failed") {
+  const response = await fetch(url, options);
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (_error) {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const message = typeof data?.error === "string" && data.error.trim() ? data.error : `${fallbackMessage} (${response.status})`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+function buildAbsoluteWebhookUrl(endpoint) {
+  return `${window.location.origin.replace(/\/+$/, "")}/webhook/${endpoint}`;
+}
+
+async function downloadEndpointExport(endpoint) {
+  const response = await fetch(`/api/endpoints/${encodeURIComponent(endpoint)}/export`, { cache: "no-store" });
+  if (!response.ok) {
+    const message = await parseErrorResponse(response, `Export failed (${response.status})`);
+    throw new Error(message);
+  }
+  const data = await response.json();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = `${endpoint}-config.json`;
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
 }
 
 async function copyText(value) {
@@ -2127,6 +2243,242 @@ function renderGeneratedTestsPreview() {
     .join("");
 }
 
+async function promptForEndpointName({
+  title,
+  message,
+  confirmLabel,
+  initialValue = "",
+  skipKey = ""
+}) {
+  const updatePreview = () => {
+    const preview = normalizeEndpointName(actionModalInputEl?.value || "");
+    const previewSuffix = preview || "(invalid)";
+    actionModalMessageEl.textContent = `${message} Preview: /webhook/${previewSuffix}`;
+  };
+
+  const inputListener = () => {
+    updatePreview();
+  };
+
+  const modalPromise = openActionModal({
+    title,
+    message: "",
+    confirmLabel,
+    cancelLabel: "Cancel",
+    inputLabel: "Endpoint name",
+    inputPlaceholder: "payment-webhook",
+    inputValue: initialValue
+  });
+  actionModalInputEl?.addEventListener("input", inputListener);
+  updatePreview();
+  const result = await modalPromise;
+  actionModalInputEl?.removeEventListener("input", inputListener);
+
+  if (typeof result !== "string") {
+    return null;
+  }
+
+  const normalizedInput = result.trim();
+  const validation = validateEndpointName(normalizedInput, appState?.endpointKeys || [], { skipKey });
+  if (!validation.ok) {
+    setSaveStatus(validation.error, "error");
+    showToast(validation.error, "error");
+    return null;
+  }
+  return validation.normalized;
+}
+
+async function createEndpointFlow() {
+  const endpointName = await promptForEndpointName({
+    title: "New Webhook Endpoint",
+    message: "Create a new endpoint route. Preview: /webhook/<name>",
+    confirmLabel: "Create",
+    initialValue: "payment-webhook"
+  });
+  if (!endpointName) {
+    return;
+  }
+
+  await callEndpointApi(
+    "/api/endpoints",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: endpointName })
+    },
+    "Failed to create endpoint"
+  );
+
+  await fetchState();
+  selectedEndpoint = endpointName;
+  renderConfig(true);
+  renderFinalWebhookUrl();
+  renderEndpointManager();
+  setSaveStatus(`Created endpoint "${endpointName}".`, "success");
+  showToast(`Created ${endpointName}`, "success");
+}
+
+async function importEndpointConfigFromFile(file) {
+  const text = await file.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_error) {
+    throw new Error("Import file must be valid JSON.");
+  }
+
+  const key = typeof parsed?.key === "string" ? parsed.key : "";
+  const config = parsed?.config;
+  if (!key.trim() || !config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("Import JSON must include { key, config }.");
+  }
+
+  const validation = validateEndpointName(key, appState?.endpointKeys || []);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
+
+  const result = await callEndpointApi(
+    "/api/endpoints/import",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: validation.normalized, config })
+    },
+    "Failed to import endpoint"
+  );
+
+  await fetchState();
+  selectedEndpoint = typeof result?.key === "string" ? result.key : validation.normalized;
+  renderConfig(true);
+  renderFinalWebhookUrl();
+  renderEndpointManager();
+  setSaveStatus(`Imported endpoint "${selectedEndpoint}".`, "success");
+  showToast(`Imported ${selectedEndpoint}`, "success");
+}
+
+async function handleEndpointAction(action, endpoint) {
+  if (!appState || !endpoint) {
+    return;
+  }
+
+  if (action === "rename-endpoint") {
+    const nextName = await promptForEndpointName({
+      title: "Rename Endpoint",
+      message: `Rename /webhook/${endpoint} to a new endpoint key.`,
+      confirmLabel: "Rename",
+      initialValue: endpoint,
+      skipKey: endpoint
+    });
+    if (!nextName || nextName === endpoint) {
+      return;
+    }
+
+    const result = await callEndpointApi(
+      `/api/endpoints/${encodeURIComponent(endpoint)}/rename`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      },
+      "Failed to rename endpoint"
+    );
+    await fetchState();
+    const renamedTo = typeof result?.key === "string" ? result.key : nextName;
+    if (selectedEndpoint === endpoint) {
+      selectedEndpoint = renamedTo;
+      renderConfig(true);
+      renderFinalWebhookUrl();
+    }
+    renderEndpointManager();
+    setSaveStatus(`Renamed "${endpoint}" to "${renamedTo}".`, "success");
+    showToast(`Renamed to ${renamedTo}`, "success");
+    return;
+  }
+
+  if (action === "duplicate-endpoint") {
+    const suggested = `${endpoint}-copy`;
+    const nextName = await promptForEndpointName({
+      title: "Duplicate Endpoint",
+      message: `Create a copy of /webhook/${endpoint}.`,
+      confirmLabel: "Duplicate",
+      initialValue: suggested
+    });
+    if (!nextName) {
+      return;
+    }
+
+    const result = await callEndpointApi(
+      `/api/endpoints/${encodeURIComponent(endpoint)}/duplicate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      },
+      "Failed to duplicate endpoint"
+    );
+    await fetchState();
+    selectedEndpoint = typeof result?.key === "string" ? result.key : nextName;
+    renderConfig(true);
+    renderFinalWebhookUrl();
+    renderEndpointManager();
+    setSaveStatus(`Duplicated "${endpoint}" to "${selectedEndpoint}".`, "success");
+    showToast(`Duplicated as ${selectedEndpoint}`, "success");
+    return;
+  }
+
+  if (action === "copy-endpoint-url") {
+    const url = buildAbsoluteWebhookUrl(endpoint);
+    try {
+      await copyText(url);
+      setSaveStatus(`Copied webhook URL for "${endpoint}".`, "success");
+      showToast("Webhook URL copied", "success");
+    } catch (_error) {
+      promptManualCopy("webhook URL", url);
+      setSaveStatus("Clipboard blocked. URL opened for manual copy.", "error");
+      showToast("Manual copy required", "error");
+    }
+    return;
+  }
+
+  if (action === "export-endpoint") {
+    await downloadEndpointExport(endpoint);
+    setSaveStatus(`Exported "${endpoint}" config.`, "success");
+    showToast("Endpoint config exported", "success");
+    return;
+  }
+
+  if (action === "delete-endpoint") {
+    const logCount = (appState.logs || []).filter((entry) => entry.endpoint === endpoint).length;
+    const confirmed = await askConfirm({
+      title: "Delete endpoint?",
+      message: `Delete /webhook/${endpoint}? ${logCount} request logs for this endpoint will be removed.`,
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    await callEndpointApi(
+      `/api/endpoints/${encodeURIComponent(endpoint)}`,
+      { method: "DELETE" },
+      "Failed to delete endpoint"
+    );
+    dirtyEndpoints.delete(endpoint);
+    if (selectedEndpoint === endpoint) {
+      const remaining = (appState.endpointKeys || []).filter((key) => key !== endpoint);
+      selectedEndpoint = remaining[0] || selectedEndpoint;
+    }
+    await fetchState();
+    renderConfig(true);
+    renderFinalWebhookUrl();
+    renderEndpointManager();
+    setSaveStatus(`Deleted endpoint "${endpoint}".`, "success");
+    showToast(`Deleted ${endpoint}`, "success");
+  }
+}
+
 endpointTabsEl.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
@@ -2148,6 +2500,95 @@ endpointTabsEl.addEventListener("click", (event) => {
   renderFinalWebhookUrl();
   setSaveStatus("", "info");
   renderEndpointTabs();
+  renderEndpointManager();
+});
+
+endpointManagerListEl?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const selectBtn = target.closest("button[data-action='select-endpoint']");
+  if (selectBtn instanceof HTMLButtonElement) {
+    const endpoint = selectBtn.dataset.endpoint;
+    if (!endpoint || endpoint === selectedEndpoint) {
+      return;
+    }
+    selectedEndpoint = endpoint;
+    renderConfig(true);
+    renderFinalWebhookUrl();
+    setSaveStatus("", "info");
+    renderEndpointTabs();
+    renderEndpointManager();
+    return;
+  }
+
+  const actionBtn = target.closest("button[data-action]");
+  if (actionBtn instanceof HTMLButtonElement) {
+    const action = actionBtn.dataset.action || "";
+    const endpoint = actionBtn.dataset.endpoint || "";
+    if (action === "toggle-endpoint-menu" && endpoint) {
+      openEndpointMenuKey = openEndpointMenuKey === endpoint ? null : endpoint;
+      renderEndpointManager();
+      return;
+    }
+    if (action && endpoint && action !== "select-endpoint") {
+      openEndpointMenuKey = null;
+      try {
+        await handleEndpointAction(action, endpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Endpoint action failed";
+        setSaveStatus(message, "error");
+        showToast(message, "error");
+      }
+      return;
+    }
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!openEndpointMenuKey) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  if (target.closest(".endpoint-row-actions")) {
+    return;
+  }
+  openEndpointMenuKey = null;
+  renderEndpointManager();
+});
+
+newEndpointBtn?.addEventListener("click", async () => {
+  try {
+    await createEndpointFlow();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create endpoint";
+    setSaveStatus(message, "error");
+    showToast(message, "error");
+  }
+});
+
+importEndpointBtn?.addEventListener("click", () => {
+  importEndpointFileEl?.click();
+});
+
+importEndpointFileEl?.addEventListener("change", async () => {
+  const file = importEndpointFileEl.files?.[0];
+  importEndpointFileEl.value = "";
+  if (!file) {
+    return;
+  }
+  try {
+    await importEndpointConfigFromFile(file);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to import endpoint";
+    setSaveStatus(message, "error");
+    showToast(message, "error");
+  }
 });
 
 configForm.addEventListener("input", () => {

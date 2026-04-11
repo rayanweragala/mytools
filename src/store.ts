@@ -11,6 +11,8 @@ const MAX_LOGS = 1000;
 
 const defaultEndpointKeys: EndpointKey[] = ["incoming-call", "call-answer", "call-end"];
 const defaultChaosConfig: ChaosConfig = { enabled: false, failureRate: 0 };
+const MAX_ENDPOINT_KEY_LENGTH = 64;
+const reservedEndpointKeys = new Set(["health", "api"]);
 
 const defaultEndpointConfig: EndpointConfig = {
   authType: "NONE",
@@ -88,6 +90,14 @@ function hasOwnProperty(target: unknown, key: string): boolean {
   return Boolean(target) && Object.prototype.hasOwnProperty.call(target, key);
 }
 
+function normalizeEndpointName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "-");
+}
+
 class Store {
   private state: AppState;
   private logIdCounter = 1;
@@ -109,7 +119,9 @@ class Store {
           chaos: loaded.chaos || defaultChaosConfig,
           logs: [], // Clear logs on load for now, or we can keep them
           maxLogs: MAX_LOGS,
-          endpointKeys: loaded.endpointKeys || defaultEndpointKeys
+          endpointKeys: Array.isArray(loaded.endpointKeys) && loaded.endpointKeys.length
+            ? [...loaded.endpointKeys]
+            : [...defaultEndpointKeys]
         };
       } catch (e) {
         logError("Failed to load state from file, using defaults", e);
@@ -121,7 +133,7 @@ class Store {
       chaos: defaultChaosConfig,
       logs: [],
       maxLogs: MAX_LOGS,
-      endpointKeys: defaultEndpointKeys
+      endpointKeys: [...defaultEndpointKeys]
     };
   }
 
@@ -148,6 +160,96 @@ class Store {
 
   getState(): AppState {
     return this.state;
+  }
+
+  addEndpoint(key: string): { ok: true; key: string } | { ok: false; error: string } {
+    const normalized = normalizeEndpointName(key);
+    if (!normalized) {
+      return { ok: false, error: "Invalid endpoint name" };
+    }
+    if (normalized.length > MAX_ENDPOINT_KEY_LENGTH) {
+      return { ok: false, error: `Endpoint name too long (max ${MAX_ENDPOINT_KEY_LENGTH} chars)` };
+    }
+    if (reservedEndpointKeys.has(normalized)) {
+      return { ok: false, error: `Endpoint name "${normalized}" is reserved` };
+    }
+    if (this.state.endpointKeys.includes(normalized)) {
+      return { ok: false, error: `Endpoint "${normalized}" already exists` };
+    }
+
+    this.state.endpointKeys.push(normalized);
+    this.state.configs[normalized] = endpointDefaultConfig(normalized);
+    this.saveState();
+    return { ok: true, key: normalized };
+  }
+
+  renameEndpoint(oldKey: string, newKey: string): { ok: true; key: string } | { ok: false; error: string } {
+    const normalizedNew = normalizeEndpointName(newKey);
+    if (!this.state.endpointKeys.includes(oldKey)) {
+      return { ok: false, error: "Endpoint not found" };
+    }
+    if (!normalizedNew) {
+      return { ok: false, error: "Invalid endpoint name" };
+    }
+    if (normalizedNew.length > MAX_ENDPOINT_KEY_LENGTH) {
+      return { ok: false, error: `Endpoint name too long (max ${MAX_ENDPOINT_KEY_LENGTH} chars)` };
+    }
+    if (reservedEndpointKeys.has(normalizedNew)) {
+      return { ok: false, error: `Endpoint name "${normalizedNew}" is reserved` };
+    }
+    if (this.state.endpointKeys.includes(normalizedNew) && normalizedNew !== oldKey) {
+      return { ok: false, error: "Name already taken" };
+    }
+
+    const idx = this.state.endpointKeys.indexOf(oldKey);
+    this.state.endpointKeys[idx] = normalizedNew;
+    this.state.configs[normalizedNew] = this.state.configs[oldKey];
+    delete this.state.configs[oldKey];
+
+    if (hasOwnProperty(this.statusIndices, oldKey)) {
+      this.statusIndices[normalizedNew] = this.statusIndices[oldKey];
+      delete this.statusIndices[oldKey];
+    }
+
+    this.state.logs.forEach((entry) => {
+      if (entry.endpoint === oldKey) {
+        entry.endpoint = normalizedNew;
+      }
+    });
+
+    this.saveState();
+    return { ok: true, key: normalizedNew };
+  }
+
+  deleteEndpoint(key: string): { ok: true } | { ok: false; error: string } {
+    if (this.state.endpointKeys.length <= 1) {
+      return { ok: false, error: "Cannot delete the last endpoint" };
+    }
+    if (!this.state.endpointKeys.includes(key)) {
+      return { ok: false, error: "Endpoint not found" };
+    }
+
+    this.state.endpointKeys = this.state.endpointKeys.filter((entry) => entry !== key);
+    delete this.state.configs[key];
+    delete this.statusIndices[key];
+    this.state.logs = this.state.logs.filter((entry) => entry.endpoint !== key);
+    this.saveState();
+    return { ok: true };
+  }
+
+  duplicateEndpoint(sourceKey: string, newKey: string): { ok: true; key: string } | { ok: false; error: string } {
+    if (!this.state.endpointKeys.includes(sourceKey)) {
+      return { ok: false, error: "Source endpoint not found" };
+    }
+
+    const result = this.addEndpoint(newKey);
+    if (!result.ok) {
+      return result;
+    }
+
+    this.state.configs[result.key] = JSON.parse(JSON.stringify(this.state.configs[sourceKey])) as EndpointConfig;
+    this.saveState();
+    return result;
   }
 
   updateConfig(endpoint: EndpointKey, cfg: Partial<EndpointConfig>) {

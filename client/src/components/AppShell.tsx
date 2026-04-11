@@ -6,6 +6,7 @@ import { NotificationCenter } from "./NotificationCenter";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { SHORTCUTS } from "../hooks/shortcuts";
 import { useAppStore } from "../stores/appStore";
+import { useBuilderStore } from "../stores/builderStore";
 
 interface AppShellProps {
   children: ReactNode;
@@ -26,6 +27,9 @@ export function AppShell({ children }: AppShellProps) {
   const openShortcutsHelp = useAppStore((s) => s.openShortcutsHelp);
   const closeShortcutsHelp = useAppStore((s) => s.closeShortcutsHelp);
   const shortcutsHelpOpen = useAppStore((s) => s.shortcutsHelpOpen);
+  const addBuilderTab = useBuilderStore((s) => s.addTab);
+  const closeBuilderTab = useBuilderStore((s) => s.closeTab);
+  const activeBuilderTabId = useBuilderStore((s) => s.activeTabId);
 
   const clearLogs = async () => {
     await fetch("/api/logs/clear", { method: "POST" });
@@ -58,6 +62,8 @@ export function AppShell({ children }: AppShellProps) {
       clearLogs,
       toggleTunnel,
       newEndpoint,
+      newBuilderTab: () => addBuilderTab(),
+      closeActiveTab: () => closeBuilderTab(activeBuilderTabId),
       goToDashboard: () => navigate("/"),
       goToSimulator: () => navigate("/simulator"),
       goToBuilder: () => navigate("/builder"),

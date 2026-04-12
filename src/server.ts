@@ -409,6 +409,58 @@ function validateConfigUpdate(
   return { ok: true, value };
 }
 
+function yamlEscape(value: string): string {
+  return JSON.stringify(value);
+}
+
+function toYaml(value: unknown, indent = 0): string {
+  const space = " ".repeat(indent);
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value === "string") {
+    return yamlEscape(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "[]";
+    }
+    return value
+      .map((entry) => {
+        if (entry && typeof entry === "object") {
+          return `${space}- ${toYaml(entry, indent + 2).trimStart()}`;
+        }
+        return `${space}- ${toYaml(entry, indent + 2)}`;
+      })
+      .join("\n");
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    return "{}";
+  }
+  return entries
+    .map(([key, entry]) => {
+      if (entry && typeof entry === "object") {
+        return `${space}${key}:\n${toYaml(entry, indent + 2)}`;
+      }
+      return `${space}${key}: ${toYaml(entry, indent + 2)}`;
+    })
+    .join("\n");
+}
+
+function buildSecuritySpec(cfg: EndpointConfig): Array<Record<string, unknown>> {
+  if (cfg.authType === "API_KEY") {
+    return [{ ApiKeyAuth: [] }];
+  }
+  if (cfg.authType === "BEARER") {
+    return [{ BearerAuth: [] }];
+  }
+  return [];
+}
+
 function validateAuth(req: Request, cfg: EndpointConfig): boolean {
   if (cfg.authType === "NONE") {
     return true;
@@ -1054,6 +1106,76 @@ app.post("/api/endpoints/reset-defaults", (_req: Request, res: Response) => {
   store.resetEndpointsToDefaults();
   pushRealtimeSnapshot();
   res.json({ success: true, endpointKeys: store.getState().endpointKeys });
+});
+
+app.get("/api/docs/openapi.yaml", (_req: Request, res: Response) => {
+  const { endpointKeys, configs } = store.getState();
+  const hasApiKey = endpointKeys.some((key) => configs[key].authType === "API_KEY");
+  const hasBearer = endpointKeys.some((key) => configs[key].authType === "BEARER");
+
+  const spec: Record<string, unknown> = {
+    openapi: "3.0.0",
+    info: { title: "mytools Webhooks", version: "1.0.0" },
+    paths: Object.fromEntries(
+      endpointKeys.map((key) => {
+        const cfg = configs[key];
+        const contentExample = (() => {
+          try {
+            return JSON.parse(cfg.responseBody || "{}");
+          } catch {
+            return { raw: cfg.responseBody || "" };
+          }
+        })();
+        return [
+          `/webhook/${key}`,
+          {
+            post: {
+              summary: `Webhook: ${key}`,
+              security: buildSecuritySpec(cfg),
+              responses: {
+                [cfg.defaultStatusCode]: {
+                  description: "Configured response",
+                  content: {
+                    "application/json": {
+                      example: contentExample
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ];
+      })
+    )
+  };
+
+  if (hasApiKey || hasBearer) {
+    (spec as { components?: Record<string, unknown> }).components = {
+      securitySchemes: {
+        ...(hasApiKey
+          ? {
+              ApiKeyAuth: {
+                type: "apiKey",
+                in: "header",
+                name: "x-api-key"
+              }
+            }
+          : {}),
+        ...(hasBearer
+          ? {
+              BearerAuth: {
+                type: "http",
+                scheme: "bearer",
+                bearerFormat: "JWT"
+              }
+            }
+          : {})
+      }
+    };
+  }
+
+  res.setHeader("Content-Type", "application/x-yaml; charset=utf-8");
+  res.send(toYaml(spec));
 });
 
 app.get("/api/builder/history", (_req, res) => {

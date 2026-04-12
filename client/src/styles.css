@@ -998,6 +998,71 @@ a {
   font-size: 0.78rem;
 }
 
+.docs-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.docs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.docs-head h1 {
+  margin: 0;
+}
+
+.docs-endpoint-list h2,
+.docs-try-card h2 {
+  margin: 0 0 10px;
+}
+
+.docs-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.docs-endpoint-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.docs-endpoint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.docs-endpoint-card p {
+  margin: 0;
+}
+
+.docs-endpoint-card h3 {
+  margin: 0;
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.docs-endpoint-card pre,
+.docs-try-card pre {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--surface) 68%, black);
+  font-family: "Monaco", Menlo, monospace;
+  font-size: 0.75rem;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;

@@ -409,6 +409,58 @@ function validateConfigUpdate(
   return { ok: true, value };
 }
 
+function yamlEscape(value: string): string {
+  return JSON.stringify(value);
+}
+
+function toYaml(value: unknown, indent = 0): string {
+  const space = " ".repeat(indent);
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value === "string") {
+    return yamlEscape(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "[]";
+    }
+    return value
+      .map((entry) => {
+        if (entry && typeof entry === "object") {
+          return `${space}- ${toYaml(entry, indent + 2).trimStart()}`;
+        }
+        return `${space}- ${toYaml(entry, indent + 2)}`;
+      })
+      .join("\n");
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    return "{}";
+  }
+  return entries
+    .map(([key, entry]) => {
+      if (entry && typeof entry === "object") {
+        return `${space}${key}:\n${toYaml(entry, indent + 2)}`;
+      }
+      return `${space}${key}: ${toYaml(entry, indent + 2)}`;
+    })
+    .join("\n");
+}
+
+function buildSecuritySpec(cfg: EndpointConfig): Array<Record<string, unknown>> {
+  if (cfg.authType === "API_KEY") {
+    return [{ ApiKeyAuth: [] }];
+  }
+  if (cfg.authType === "BEARER") {
+    return [{ BearerAuth: [] }];
+  }
+  return [];
+}
+
 function validateAuth(req: Request, cfg: EndpointConfig): boolean {
   if (cfg.authType === "NONE") {
     return true;
@@ -807,7 +859,9 @@ function buildSseSnapshot() {
   return {
     state: store.getState(),
     tunnel: { active: Boolean(tunnelUrl), url: tunnelUrl },
-    chaos: store.getChaos()
+    chaos: store.getChaos(),
+    clientCount: sseClients.size,
+    activeEndpoints: store.getState().endpointKeys
   };
 }
 
@@ -879,6 +933,57 @@ app.head("/api/events", (_req, res) => {
 app.get("/api/state", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.json(store.getState());
+});
+
+app.get("/api/stats", (_req, res) => {
+  const logs = store.getState().logs;
+  const now = Date.now();
+  const oneHourAgo = now - 60 * 60 * 1000;
+
+  const recent = logs.filter((entry) => new Date(entry.timestamp).getTime() > oneHourAgo);
+  const successful = recent.filter((entry) => entry.returnedStatusCode < 400);
+
+  const byMinute: Record<string, { total: number; success: number; error: number }> = {};
+  recent.forEach((entry) => {
+    const minute = new Date(entry.timestamp).toISOString().slice(0, 16);
+    if (!byMinute[minute]) {
+      byMinute[minute] = { total: 0, success: 0, error: 0 };
+    }
+    byMinute[minute].total += 1;
+    if (entry.returnedStatusCode < 400) {
+      byMinute[minute].success += 1;
+    } else {
+      byMinute[minute].error += 1;
+    }
+  });
+
+  const byEndpoint: Record<string, { total: number; success: number; avgLatency: number }> = {};
+  logs.forEach((entry) => {
+    if (!byEndpoint[entry.endpoint]) {
+      byEndpoint[entry.endpoint] = { total: 0, success: 0, avgLatency: 0 };
+    }
+    byEndpoint[entry.endpoint].total += 1;
+    if (entry.returnedStatusCode < 400) {
+      byEndpoint[entry.endpoint].success += 1;
+    }
+    byEndpoint[entry.endpoint].avgLatency += entry.durationMs ?? 0;
+  });
+
+  Object.values(byEndpoint).forEach((endpoint) => {
+    endpoint.avgLatency = endpoint.total ? endpoint.avgLatency / endpoint.total : 0;
+  });
+
+  res.json({
+    total: logs.length,
+    recentTotal: recent.length,
+    successRate: recent.length ? (successful.length / recent.length) * 100 : 100,
+    avgLatency: recent.length
+      ? recent.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0) / recent.length
+      : 0,
+    byMinute,
+    byEndpoint,
+    endpointCount: store.getState().endpointKeys.length
+  });
 });
 
 app.get("/api/config/features", (_req, res) => {
@@ -997,6 +1102,82 @@ app.post("/api/endpoints/import", (req: Request, res: Response) => {
   store.updateConfig(result.key as EndpointKey, config as Partial<EndpointConfig>);
   pushRealtimeSnapshot();
   res.status(201).json({ success: true, key: result.key, webhookUrl: `/webhook/${result.key}` });
+});
+
+app.post("/api/endpoints/reset-defaults", (_req: Request, res: Response) => {
+  store.resetEndpointsToDefaults();
+  pushRealtimeSnapshot();
+  res.json({ success: true, endpointKeys: store.getState().endpointKeys });
+});
+
+app.get("/api/docs/openapi.yaml", (_req: Request, res: Response) => {
+  const { endpointKeys, configs } = store.getState();
+  const hasApiKey = endpointKeys.some((key) => configs[key].authType === "API_KEY");
+  const hasBearer = endpointKeys.some((key) => configs[key].authType === "BEARER");
+
+  const spec: Record<string, unknown> = {
+    openapi: "3.0.0",
+    info: { title: "mytools Webhooks", version: "1.0.0" },
+    paths: Object.fromEntries(
+      endpointKeys.map((key) => {
+        const cfg = configs[key];
+        const contentExample = (() => {
+          try {
+            return JSON.parse(cfg.responseBody || "{}");
+          } catch {
+            return { raw: cfg.responseBody || "" };
+          }
+        })();
+        return [
+          `/webhook/${key}`,
+          {
+            post: {
+              summary: `Webhook: ${key}`,
+              security: buildSecuritySpec(cfg),
+              responses: {
+                [cfg.defaultStatusCode]: {
+                  description: "Configured response",
+                  content: {
+                    "application/json": {
+                      example: contentExample
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ];
+      })
+    )
+  };
+
+  if (hasApiKey || hasBearer) {
+    (spec as { components?: Record<string, unknown> }).components = {
+      securitySchemes: {
+        ...(hasApiKey
+          ? {
+              ApiKeyAuth: {
+                type: "apiKey",
+                in: "header",
+                name: "x-api-key"
+              }
+            }
+          : {}),
+        ...(hasBearer
+          ? {
+              BearerAuth: {
+                type: "http",
+                scheme: "bearer",
+                bearerFormat: "JWT"
+              }
+            }
+          : {})
+      }
+    };
+  }
+
+  res.setHeader("Content-Type", "application/x-yaml; charset=utf-8");
+  res.send(toYaml(spec));
 });
 
 app.get("/api/builder/history", (_req, res) => {

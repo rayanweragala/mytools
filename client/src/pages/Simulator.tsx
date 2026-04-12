@@ -262,7 +262,7 @@ export function Simulator() {
   };
 
   return (
-    <section className="simulator-grid">
+    <section className={`simulator-grid ${activeLog ? "has-drawer" : "no-drawer"}`}>
       <article className="page-card">
         <div className="simulator-head-row">
           <h1>Simulator Logs</h1>

@@ -134,10 +134,14 @@ a {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  width: min(1400px, 100%);
+  margin: 0 auto;
 }
 
 .page-frame {
   min-height: 0;
+  width: min(1400px, 100%);
+  margin: 0 auto;
 }
 
 .page-card {
@@ -186,15 +190,21 @@ a {
 }
 
 .shell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 75%, black);
   color: var(--text-main);
-  padding: 8px 10px;
+  padding: 0 12px;
   border-radius: 10px;
   text-transform: uppercase;
   letter-spacing: 0.2px;
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.76rem;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -441,11 +451,12 @@ a {
 }
 
 .response-tab {
+  min-height: 34px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 74%, black);
   color: var(--text-main);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 0 12px;
   font-size: 0.74rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -519,9 +530,13 @@ a {
 
 .simulator-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 36%);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+}
+
+.simulator-grid.has-drawer {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 36%);
 }
 
 .simulator-head-row {
@@ -556,11 +571,12 @@ a {
 }
 
 .chip-btn {
+  min-height: 34px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 75%, black);
   color: var(--text-main);
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 0 10px;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.2px;
@@ -734,7 +750,7 @@ a {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 14px;
 }
 
@@ -746,6 +762,7 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 
 .settings-actions-col {
@@ -820,7 +837,7 @@ a {
 
 .collections-grid {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -902,11 +919,12 @@ a {
 }
 
 .collection-folder-toggle {
+  min-height: 34px;
   border: none;
   background: transparent;
   color: var(--text-main);
   text-align: left;
-  padding: 6px 4px;
+  padding: 0 6px;
   cursor: pointer;
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -922,12 +940,13 @@ a {
 }
 
 .collection-request-btn {
+  min-height: 34px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 76%, black);
   color: var(--text-main);
   text-align: left;
-  padding: 6px 8px;
+  padding: 0 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1006,7 +1025,8 @@ a {
 .docs-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1179,6 +1199,10 @@ a {
   }
 
   .simulator-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .simulator-grid.has-drawer {
     grid-template-columns: 1fr;
   }
 

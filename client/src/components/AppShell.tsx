@@ -1,4 +1,4 @@
-import { ReactNode, useMemo } from "react";
+import { ReactNode, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
@@ -27,6 +27,7 @@ export function AppShell({ children }: AppShellProps) {
   const openShortcutsHelp = useAppStore((s) => s.openShortcutsHelp);
   const closeShortcutsHelp = useAppStore((s) => s.closeShortcutsHelp);
   const shortcutsHelpOpen = useAppStore((s) => s.shortcutsHelpOpen);
+  const setCollaboration = useAppStore((s) => s.setCollaboration);
   const addBuilderTab = useBuilderStore((s) => s.addTab);
   const closeBuilderTab = useBuilderStore((s) => s.closeTab);
   const activeBuilderTabId = useBuilderStore((s) => s.activeTabId);
@@ -89,6 +90,22 @@ export function AppShell({ children }: AppShellProps) {
   );
 
   useKeyboardShortcuts(shortcutHandlers);
+
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as { clientCount?: number; activeEndpoints?: string[] };
+        setCollaboration({
+          clientCount: payload.clientCount,
+          activeEndpoints: payload.activeEndpoints
+        });
+      } catch {
+        // Ignore malformed realtime payloads.
+      }
+    };
+    return () => source.close();
+  }, [setCollaboration]);
 
   return (
     <div className="app-shell">

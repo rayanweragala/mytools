@@ -859,7 +859,9 @@ function buildSseSnapshot() {
   return {
     state: store.getState(),
     tunnel: { active: Boolean(tunnelUrl), url: tunnelUrl },
-    chaos: store.getChaos()
+    chaos: store.getChaos(),
+    clientCount: sseClients.size,
+    activeEndpoints: store.getState().endpointKeys
   };
 }
 

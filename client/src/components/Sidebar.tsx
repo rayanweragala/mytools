@@ -32,6 +32,8 @@ const navSections = [
 export function Sidebar() {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const clientCount = useAppStore((s) => s.clientCount);
+  const activeEndpoints = useAppStore((s) => s.activeEndpoints);
 
   const tunnel = useQuery({
     queryKey: ["sidebar", "tunnel"],
@@ -94,6 +96,12 @@ export function Sidebar() {
           <strong>
             {features.data?.localAiEnabled ? "Local AI" : features.data?.geminiEnabled ? "Gemini" : "Disabled"}
           </strong>
+        </p>
+        <p>
+          Sessions: <strong>{clientCount}</strong>
+        </p>
+        <p>
+          Endpoints: <strong>{activeEndpoints.length}</strong>
         </p>
       </section>
     </aside>
